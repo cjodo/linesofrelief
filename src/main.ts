@@ -13,6 +13,7 @@ import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
 import { createExport } from './export';
 import { createShare } from './share';
+import { settable } from './text';
 import { pageSpot, readSpot, spotUrl, type Spot } from './url';
 import { lonLatToWorld, worldToLonLat } from './tiles';
 
@@ -281,6 +282,8 @@ function arrive(
 ) {
   ({ x: cx, y: cy } = lonLatToWorld(place.lon, place.lat, ZOOM));
   const home = place === pageSpot;
+  // e.g. a search hit named only in another script: name the view ourselves.
+  if (place.name && !settable(place.name)) place = { ...place, name: undefined };
   arrival = { x: cx, y: cy, name: place.name, home };
   clearTimeout(syncTimer);
   if (push) history.pushState(null, '', spotUrl(place));
@@ -348,6 +351,9 @@ prerenderImg?.addEventListener('error', () => {
 const KNOWN_NAME_M = 10_000;
 /** A reverse-lookup result farther than this names the region, not the view. */
 const REVERSE_NEAR_KM = 25;
+/** Reverse-lookup features that can name a view (not roads, shops, buildings…). */
+const NAMING_KEYS = new Set(['place', 'natural', 'waterway', 'water', 'boundary', 'mountain_pass']);
+const usable = (s?: string) => (s && settable(s) ? s : undefined);
 let nameId = -1;
 
 /** Name the arrival: a known summit nearby, else the map tiles, else the server. */
@@ -378,7 +384,8 @@ async function named({ id, name, ele }: NameResult) {
       const [flon, flat] = f.geometry.coordinates;
       const km = Math.hypot((flon - lon) * Math.cos((lat * Math.PI) / 180), flat - lat) * 111.32;
       const p = f.properties;
-      fallback = (km <= REVERSE_NEAR_KM && p.name) || p.state || p.country;
+      const own = km <= REVERSE_NEAR_KM && NAMING_KEYS.has(p.osm_key) ? usable(p.name) : undefined;
+      fallback = own ?? usable(p.state) ?? usable(p.country);
     }
   } catch {
     // offline or no server: coordinates it is

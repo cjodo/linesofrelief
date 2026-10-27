@@ -9,6 +9,7 @@ import {
   vectorUrl,
 } from './config';
 import { decodeTile, type Feature } from './mvt';
+import { settable } from './text';
 
 // --- Web mercator ----------------------------------------------------------
 
@@ -222,10 +223,10 @@ function decodeVector(buf: ArrayBuffer): VectorData {
     for (const f of layer.features) fn(f, scale);
   };
   const nameOf = (p: Record<string, unknown>) =>
-    // `||`, not `??`: tiles often carry an empty name:latin. Names with no
-    // Latin script are dropped: the bundled faces can't set them.
+    // The first name the bundled faces can set (tiles often carry an empty
+    // or mixed-script name:latin); none at all drops the label.
     [p['name:latin'], p['name:en'], p.name].find(
-      (n): n is string => typeof n === 'string' && /\p{Script=Latin}/u.test(n),
+      (n): n is string => typeof n === 'string' && settable(n),
     );
 
   each('water', (f, s) => {

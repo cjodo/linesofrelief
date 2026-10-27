@@ -1,3 +1,5 @@
+import { settable } from './text';
+
 /**
  * The address bar mirrors the view, so any URL is a shareable link:
  *   /?name=Kilimanjaro&lat=-3.0758&lon=37.3533
@@ -27,7 +29,9 @@ export function readSpot(search = location.search): Spot | null {
     return null;
   }
   if (Math.abs(lat) > MAX_LAT || Math.abs(lon) > 180) return null;
-  const name = p.get('name')?.trim().slice(0, MAX_NAME) || undefined;
+  // A name the fonts can't set (or an old link carrying one) is re-resolved.
+  const raw = p.get('name')?.trim().slice(0, MAX_NAME);
+  const name = raw && settable(raw) ? raw : undefined;
   return { name, lat, lon };
 }
 
