@@ -1,0 +1,13 @@
+{
+  "name": "Topography",
+  "short_name": "Topography",
+  "description": "Contour maps of any mountain on Earth.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#191724",
+  "theme_color": "#191724",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

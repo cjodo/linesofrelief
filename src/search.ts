@@ -1,4 +1,4 @@
-import { SEARCH_TAGS, SEARCH_URL } from './config';
+import { SEARCH_URL } from './config';
 
 export interface Place {
   name: string;
@@ -41,10 +41,9 @@ function rank(places: Place[], q: string): Place[] {
 
 const MIN_CHARS = 2;
 const DEBOUNCE_MS = 250;
-const LIMIT = 7;
 
-// Photon is a shared free service: debounce, abort superseded queries and
-// remember answers so retyping or backspacing costs nothing.
+// The server caches answers for everyone; here we debounce, abort superseded
+// queries and remember answers so retyping or backspacing costs nothing.
 const cache = new Map<string, Place[]>();
 
 async function query(q: string, signal: AbortSignal): Promise<Place[]> {
@@ -52,13 +51,7 @@ async function query(q: string, signal: AbortSignal): Promise<Place[]> {
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const url = new URL(SEARCH_URL);
-  url.searchParams.set('q', q);
-  url.searchParams.set('limit', String(LIMIT));
-  url.searchParams.set('lang', 'en');
-  for (const tag of SEARCH_TAGS) url.searchParams.append('osm_tag', tag);
-
-  const res = await fetch(url, { signal });
+  const res = await fetch(`${SEARCH_URL}?q=${encodeURIComponent(q)}`, { signal });
   if (!res.ok) return [];
   const { features } = (await res.json()) as { features: PhotonFeature[] };
 

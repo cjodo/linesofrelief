@@ -1,0 +1,17 @@
+[package]
+name = "topography-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8"
+redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
+reqwest = { version = "0.13", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tower-http = { version = "0.7", features = ["fs", "compression-gzip", "compression-br"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

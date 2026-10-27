@@ -1,14 +1,14 @@
-import { VectorTile } from '@mapbox/vector-tile';
-import Pbf from 'pbf';
 import {
   CACHE_NAME,
   MAX_CONCURRENT,
   MEMORY_TILES,
   PERSISTENT_TILES,
   TILE,
-  VECTOR_TILEJSON,
-  tileUrl,
+  STALE_CACHES,
+  terrainUrl,
+  vectorUrl,
 } from './config';
+import { decodeTile, type Feature } from './mvt';
 
 // --- Web mercator ----------------------------------------------------------
 
@@ -38,6 +38,9 @@ export function worldToLonLat(x: number, y: number, z: number) {
 
 let diskCache: Promise<Cache | null> | null = null;
 function openDisk() {
+  if (!diskCache && 'caches' in self) {
+    for (const name of STALE_CACHES) caches.delete(name).catch(() => {});
+  }
   diskCache ??= ('caches' in self ? caches.open(CACHE_NAME) : Promise.resolve(null)).catch(
     () => null,
   );
@@ -66,16 +69,16 @@ async function pruneDisk(cache: Cache) {
   }
 }
 
-/** Fetch through the disk cache. `key` is stable; `url` may be versioned. */
-async function fetchCached(key: string, url: () => Promise<string>): Promise<Response | null> {
+/** Fetch through the disk cache. */
+async function fetchCached(url: string): Promise<Response | null> {
   const cache = await openDisk();
-  const hit = await cache?.match(key);
+  const hit = await cache?.match(url);
   if (hit) return hit;
 
-  const res = await throttled(async () => fetch(await url(), { mode: 'cors' }));
+  const res = await throttled(() => fetch(url));
   if (!res.ok) return null;
   if (cache) {
-    await cache.put(key, res.clone()).catch(() => {});
+    await cache.put(url, res.clone()).catch(() => {});
     if (++writesSincePrune >= 100) {
       writesSincePrune = 0;
       pruneDisk(cache).catch(() => {});
@@ -136,12 +139,12 @@ async function decodeElevation(blob: Blob): Promise<Float32Array> {
 export function loadElevation(z: number, x: number, y: number): Promise<Float32Array> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(flat);
-  const url = tileUrl(z, t.x, t.y);
+  const url = terrainUrl(z, t.x, t.y);
   return memoize(
     elevations,
     url,
     async () => {
-      const res = await fetchCached(url, async () => url);
+      const res = await fetchCached(url);
       return res ? decodeElevation(await res.blob()) : flat;
     },
     flat,
@@ -203,21 +206,25 @@ const LAKE_CLASSES = new Set(['lake', 'pond', 'river']);
 const PLACE_KINDS: Record<string, LabelKind> = { city: 'city', town: 'town', village: 'village' };
 
 function decodeVector(buf: ArrayBuffer): VectorData {
-  const { layers } = new VectorTile(new Pbf(buf));
+  const layers = decodeTile(buf);
   const ocean = new GeometryBuilder();
   const lake = new GeometryBuilder();
   const river = new GeometryBuilder();
   const border = new GeometryBuilder();
   const labels: Label[] = [];
 
-  const each = (name: string, fn: (f: ReturnType<VectorTile['layers'][string]['feature']>, scale: number) => void) => {
+  const each = (name: string, fn: (f: Feature, scale: number) => void) => {
     const layer = layers[name];
     if (!layer) return;
     const scale = TILE / layer.extent;
-    for (let i = 0; i < layer.length; i++) fn(layer.feature(i), scale);
+    for (const f of layer.features) fn(f, scale);
   };
   const nameOf = (p: Record<string, unknown>) =>
-    (p['name:latin'] ?? p['name:en'] ?? p.name) as string | undefined;
+    // `||`, not `??`: tiles often carry an empty name:latin. Names with no
+    // Latin script are dropped: the bundled faces can't set them.
+    [p['name:latin'], p['name:en'], p.name].find(
+      (n): n is string => typeof n === 'string' && /\p{Script=Latin}/u.test(n),
+    );
 
   each('water', (f, s) => {
     const cls = f.properties.class as string;
@@ -261,29 +268,17 @@ function decodeVector(buf: ArrayBuffer): VectorData {
 }
 
 const vectors = new Map<string, Promise<VectorData>>();
-let vectorTemplate: Promise<string> | null = null;
-
-/** The TileJSON URL is versioned per data release; only fetched on a cache miss. */
-function vectorUrl(z: number, x: number, y: number): Promise<string> {
-  vectorTemplate ??= fetch(VECTOR_TILEJSON)
-    .then((r) => r.json())
-    .then((j: { tiles: string[] }) => j.tiles[0]);
-  vectorTemplate.catch(() => (vectorTemplate = null));
-  return vectorTemplate.then((t) =>
-    t.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)),
-  );
-}
 
 /** Water, borders and names for a tile, in tile pixels. Never rejects. */
 export function loadVector(z: number, x: number, y: number): Promise<VectorData> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(emptyVector);
-  const key = `${VECTOR_TILEJSON}/${z}/${t.x}/${t.y}.pbf`;
+  const url = vectorUrl(z, t.x, t.y);
   return memoize(
     vectors,
-    key,
+    url,
     async () => {
-      const res = await fetchCached(key, () => vectorUrl(z, t.x, t.y));
+      const res = await fetchCached(url);
       return res ? decodeVector(await res.arrayBuffer()) : emptyVector;
     },
     emptyVector,

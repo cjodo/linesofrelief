@@ -7,8 +7,96 @@
 //! Output layout after `run`:
 //!   coords: f32 x,y pairs in downsampled-grid units (cell centres at +0.5)
 //!   meta:   u32 per level: [value, line_count, len_0 .. len_n] (len in points)
+//!
+//! no_std keeps the module small: no panic messages or formatting machinery.
+//! A panic (only possible from a bug) traps.
 
-use std::ptr::addr_of_mut;
+#![no_std]
+
+extern crate alloc;
+
+use alloc::{vec, vec::Vec};
+use core::alloc::{GlobalAlloc, Layout};
+use core::arch::wasm32::{memory_grow, memory_size};
+use core::ptr::{addr_of_mut, null_mut};
+
+// --- Allocator ----------------------------------------------------------------
+//
+// Every allocation lives for exactly one run: JS copies the results out before
+// the next `input_ptr`, which resets the heap. So a bump allocator suffices,
+// and is a fraction of the size of a general-purpose one.
+
+extern "C" {
+    /// End of static data; the linker places the heap after it.
+    static __heap_base: u8;
+}
+
+struct Bump;
+
+static mut NEXT: usize = 0;
+
+const PAGE: usize = 65_536;
+
+fn heap_base() -> usize {
+    // SAFETY: linker-provided symbol; only its address is used.
+    unsafe { &__heap_base as *const u8 as usize }
+}
+
+/// Make sure linear memory reaches `end`, growing it if needed.
+fn reserve(end: usize) -> bool {
+    let have = memory_size(0) * PAGE;
+    end <= have || memory_grow(0, (end - have).div_ceil(PAGE)) != usize::MAX
+}
+
+unsafe impl GlobalAlloc for Bump {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let next = if NEXT == 0 { heap_base() } else { NEXT };
+        let start = (next + layout.align() - 1) & !(layout.align() - 1);
+        let end = start + layout.size();
+        if !reserve(end) {
+            return null_mut();
+        }
+        NEXT = end;
+        start as *mut u8
+    }
+
+    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // The newest allocation can grow in place, which is how Vecs grow here.
+        if ptr as usize + layout.size() == NEXT {
+            let end = ptr as usize + new_size;
+            if !reserve(end) {
+                return null_mut();
+            }
+            NEXT = end;
+            return ptr;
+        }
+        let new = self.alloc(Layout::from_size_align_unchecked(new_size, layout.align()));
+        if !new.is_null() {
+            core::ptr::copy_nonoverlapping(ptr, new, layout.size().min(new_size));
+        }
+        new
+    }
+}
+
+#[global_allocator]
+static ALLOC: Bump = Bump;
+
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! {
+    core::arch::wasm32::unreachable()
+}
+
+/// `f32::floor` lives in std; values here are far inside i32 range.
+fn floor(x: f32) -> f32 {
+    let t = x as i32 as f32;
+    if t > x {
+        t - 1.0
+    } else {
+        t
+    }
+}
 
 const NONE: u32 = u32::MAX;
 
@@ -31,6 +119,12 @@ fn state() -> &'static mut State {
 /// Reserve `len` floats for the full-resolution input grid and return them.
 #[no_mangle]
 pub extern "C" fn input_ptr(len: usize) -> *mut f32 {
+    // A new run: everything from the last one is dead, so start the heap over.
+    // SAFETY: single-threaded; the old state is dropped before the reset.
+    unsafe {
+        *addr_of_mut!(STATE) = None;
+        NEXT = heap_base();
+    }
     let s = state();
     s.input.clear();
     s.input.resize(len, 0.0);
@@ -91,11 +185,11 @@ pub extern "C" fn run(width: u32, height: u32, ds: u32, interval: f32, epsilon: 
         return;
     }
 
-    let t0 = ((lo / interval).floor() + 1.0) * interval;
+    let t0 = (floor(lo / interval) + 1.0) * interval;
     if t0 > hi {
         return;
     }
-    let levels = ((hi - t0) / interval).floor() as usize + 1;
+    let levels = floor((hi - t0) / interval) as usize + 1;
 
     // Bucket cells by the levels that can cross them (counting sort), so each
     // level only visits its own cells instead of rescanning the whole grid.
@@ -104,8 +198,8 @@ pub extern "C" fn run(width: u32, height: u32, ds: u32, interval: f32, epsilon: 
         let lo = a.min(b).min(c).min(d);
         let hi = a.max(b).max(c).max(d);
         // Widen by one each side; the per-cell case test discards misses.
-        let kmin = ((lo - t0) / interval).floor() as isize;
-        let kmax = ((hi - t0) / interval).floor() as isize + 1;
+        let kmin = floor((lo - t0) / interval) as isize;
+        let kmax = floor((hi - t0) / interval) as isize + 1;
         let kmin = kmin.max(0) as usize;
         let kmax = kmax.min(levels as isize - 1);
         (kmax >= kmin as isize).then(|| (kmin, kmax as usize))
@@ -211,7 +305,7 @@ pub extern "C" fn run(width: u32, height: u32, ds: u32, interval: f32, epsilon: 
         }
 
         let meta_start = s.meta.len();
-        s.meta.extend([t.round() as u32, 0]);
+        s.meta.extend([floor(t + 0.5) as u32, 0]);
         visited.clear();
         visited.resize(segs.len(), false);
 
@@ -229,7 +323,7 @@ pub extern "C" fn run(width: u32, height: u32, ds: u32, interval: f32, epsilon: 
                 walk(&segs, &slot_a, &slot_b, &mut visited, start as u32, e0, &mut back);
                 back.reverse();
                 back.extend_from_slice(&line);
-                std::mem::swap(&mut line, &mut back);
+                core::mem::swap(&mut line, &mut back);
             }
 
             pts.clear();
@@ -319,7 +413,7 @@ fn simplify(pts: &[[f32; 2]], eps: f32, keep: &mut Vec<bool>, stack: &mut Vec<(u
                 let cross = dx * (py - ay) - dy * (px - ax);
                 cross * cross / len2
             } else {
-                (px - ax).powi(2) + (py - ay).powi(2)
+                (px - ax) * (px - ax) + (py - ay) * (py - ay)
             };
             if d2 > best {
                 best = d2;

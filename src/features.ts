@@ -62,9 +62,9 @@ const STYLE: Record<LabelKind, LabelStyle> = {
   peak: { font: `italic 400 16px ${SERIF}`, color: INK.text, spacing: 0.3, upper: false, order: 1, gap: 64 },
   water: { font: `italic 400 15px ${SERIF}`, color: INK.shore, spacing: 1.2, upper: false, order: 2, gap: 24 },
   town: { font: `400 9.5px ${MONO}`, color: INK.subtle, spacing: 2.4, upper: true, order: 3, gap: 16 },
-  village: { font: `300 9px ${MONO}`, color: INK.muted, spacing: 2, upper: true, order: 4, gap: 12 },
+  village: { font: `400 9px ${MONO}`, color: INK.muted, spacing: 2, upper: true, order: 4, gap: 12 },
 };
-const ELE_FONT = `300 9px ${MONO}`;
+const ELE_FONT = `400 9px ${MONO}`;
 
 /** Settlement dot radius; names sit just above the dot. */
 export const DOT: Partial<Record<LabelKind, number>> = { city: 3, town: 2.2, village: 1.6 };

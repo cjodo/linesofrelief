@@ -1,14 +1,12 @@
-import '@fontsource/instrument-serif/400.css';
-import '@fontsource/instrument-serif/400-italic.css';
-import '@fontsource/jetbrains-mono/300.css';
-import '@fontsource/jetbrains-mono/400.css';
-import './style.css';
 import { DS, MONO, SERIF, START, TILE, ZOOM } from './config';
 import type { SceneProgress, SceneRequest, SceneResult } from './contour.worker';
+import { Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
 import { buildFeatures, type Features } from './features';
 import { createLegend } from './legend';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
+import { createShare } from './share';
+import { pageSpot, readSpot, spotUrl, type Spot } from './url';
 import { lonLatToWorld, worldToLonLat } from './tiles';
 
 /** Extra world pixels fetched beyond the viewport on each side. */
@@ -34,12 +32,32 @@ const introFill = intro.querySelector<HTMLElement>('.fill')!;
 
 // Canvas text can't fall back gracefully mid-frame; wait for the bundled faces.
 const fontsReady = Promise.all(
-  [`italic 16px ${SERIF}`, `16px ${SERIF}`, `300 9px ${MONO}`, `400 11px ${MONO}`].map((f) =>
+  [`italic 16px ${SERIF}`, `400 11px ${MONO}`].map((f) =>
     document.fonts.load(f),
   ),
 ).catch(() => {});
 
 const emptyFeatures: Features = { tiles: [], labels: [] };
+
+/**
+ * The build-time render of this page's map, if it shipped one and the URL is
+ * for this page's own place. It is the first frame; the live map fades in over
+ * an identical picture, then it is retired.
+ */
+const prerender = document.querySelector<HTMLElement>('.prerender');
+const prerenderImg = prerender?.querySelector('img') ?? null;
+let prerenderLive =
+  prerenderImg !== null &&
+  !document.documentElement.classList.contains('elsewhere') &&
+  // Already failed before this script ran (the error listener would miss it).
+  !(prerenderImg.complete && prerenderImg.naturalWidth === 0);
+
+function retirePrerender() {
+  if (!prerender || !prerenderLive) return;
+  prerenderLive = false;
+  prerender.classList.add('gone');
+  setTimeout(() => prerender.remove(), 1300);
+}
 
 const worker = new Worker(new URL('./contour.worker.ts', import.meta.url), { type: 'module' });
 
@@ -90,9 +108,59 @@ function requestDraw() {
       pctx.clearRect(0, 0, w, h);
       draw(pctx, preview, x0, y0, w, h);
     }
+    if (prerenderLive) {
+      // Early pans move the picture with the map until the live canvas is in.
+      prerenderImg!.style.setProperty('--dx', `${arrival.x - cx}px`);
+      prerenderImg!.style.setProperty('--dy', `${arrival.y - cy}px`);
+    }
     const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
     readout.textContent = formatLonLat(lat, lon);
+    discover();
   });
+}
+
+// --- Discovery --------------------------------------------------------------
+
+const atlas = new Atlas();
+const showCard = createCard(document.querySelector<HTMLElement>('#discovery')!);
+const fmt = new Intl.NumberFormat('en-US');
+
+/** A search (or Back) arrival announces itself with the card once the map is in. */
+let pendingCard: { key: string; name: string; kind?: string; context?: string } | null = null;
+
+/** An important summit reaching the centre of the screen for the first time. */
+function discover() {
+  if (!document.body.classList.contains('loaded')) return;
+  const mark = atlas.near(cx, cy, CENTRE_PX);
+  if (!mark || discovered.has(mark.key)) return;
+  markDiscovered(mark.key);
+  showCard({ eyebrow: 'New area discovered', name: mark.name, detail: mark.detail });
+}
+
+/** Called as the detailed map lands: play or silence the arrival's discovery. */
+function settleArrival() {
+  const mark = atlas.near(cx, cy, CENTRE_PX);
+  const card = pendingCard;
+  pendingCard = null;
+  if (card) {
+    const seen = discovered.has(card.key) || (mark !== null && discovered.has(mark.key));
+    const region = card.kind === 'country';
+    const detail = region
+      ? 'Country'
+      : mark?.curated
+        ? mark.detail
+        : [mark?.ele !== undefined ? `${fmt.format(mark.ele)} m` : '', card.context]
+            .filter(Boolean)
+            .join(' · ');
+    showCard({
+      eyebrow: seen ? 'Returning to' : region ? 'New region discovered' : 'New area discovered',
+      name: card.name,
+      detail,
+    });
+    markDiscovered(card.key);
+  }
+  // The intro (or the card above) already named this place; don't announce it twice.
+  if (mark) markDiscovered(mark.key);
 }
 
 /** Tiles at zoom `z` covering the view (plus margin), `k` screen px per tile px. */
@@ -145,6 +213,8 @@ function reveal() {
   document.body.classList.add('loaded');
   canvas.classList.add('ready');
   previewCanvas.classList.add('gone');
+  // Once the live canvas has faded in over it (1.6 s), the picture can go.
+  if (prerenderLive) setTimeout(retirePrerender, 1700);
 }
 
 previewCanvas.addEventListener('transitionend', (e) => {
@@ -154,12 +224,53 @@ previewCanvas.addEventListener('transitionend', (e) => {
   intro.hidden = true;
 });
 
+// --- Shareable URL ----------------------------------------------------------
+
+/** The page's own title (e.g. "Mount Everest contour map · …"), kept while at its summit. */
+const PAGE_TITLE = document.title;
+const titleFor = (name?: string) => (name ? `${name} · Topography` : 'Topography');
+const shortLonLat = (lat: number, lon: number) =>
+  `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}`;
+
+/** Where the current visit arrived; its name holds until the view wanders off. */
+let arrival: { x: number; y: number; name?: string; home: boolean } = { x: 0, y: 0, home: false };
+
+/** The view as a shareable URL and title. */
+function currentLink() {
+  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  const near = Math.hypot(cx - arrival.x, cy - arrival.y) < Math.max(w, h) / 2;
+  if (near && arrival.home) return { url: location.pathname, title: PAGE_TITLE };
+  const name = near ? arrival.name : undefined;
+  return { url: spotUrl({ name, lat, lon }), title: titleFor(name) };
+}
+
+let syncTimer = 0;
+/** Panning rewrites the current history entry rather than piling up new ones. */
+function syncUrl() {
+  clearTimeout(syncTimer);
+  syncTimer = window.setTimeout(() => {
+    const { url, title } = currentLink();
+    history.replaceState(null, '', url);
+    document.title = title;
+  }, 300);
+}
+
 /**
  * Every visit, and every search, arrives the same way: the old map fades,
  * the place name comes up over a coarse preview, the detail resolves in.
+ * `push` adds a history entry so Back returns to the previous place.
+ * `announce` swaps the big intro title for the discovery card on landing.
  */
-function arrive(place: { name: string; lat: number; lon: number }) {
+function arrive(
+  place: Spot & { kind?: string; context?: string },
+  { push = false, announce = false } = {},
+) {
   ({ x: cx, y: cy } = lonLatToWorld(place.lon, place.lat, ZOOM));
+  const home = place === pageSpot;
+  arrival = { x: cx, y: cy, name: place.name, home };
+  clearTimeout(syncTimer);
+  if (push) history.pushState(null, '', spotUrl(place));
+  document.title = home ? PAGE_TITLE : titleFor(place.name);
   scene = null;
   preview = null;
   detailId = -1;
@@ -170,17 +281,47 @@ function arrive(place: { name: string; lat: number; lon: number }) {
   previewCanvas.hidden = false;
   pctx.clearRect(0, 0, w, h);
   intro.hidden = false;
-  intro.querySelector<HTMLElement>('.place')!.textContent = place.name;
+  intro.querySelector<HTMLElement>('.place')!.textContent =
+    place.name ?? shortLonLat(place.lat, place.lon);
+  intro.querySelector<HTMLElement>('.detail')!.textContent = place.detail ?? '';
   intro.querySelector<HTMLElement>('.where')!.textContent = formatLonLat(place.lat, place.lon);
   introFill.style.transform = 'scaleX(0)';
   introStatus.textContent = 'Surveying';
+  intro.classList.toggle('transit', announce);
+  pendingCard = announce
+    ? {
+        key: `${place.name ?? ''}@${place.lat.toFixed(2)},${place.lon.toFixed(2)}`,
+        name: place.name ?? shortLonLat(place.lat, place.lon),
+        kind: place.kind,
+        context: place.context,
+      }
+    : null;
 
-  // Queue the coarse preview ahead of the detailed request so it paints first.
+  // The page's own pre-rendered map stands in for the coarse preview.
+  if (home && prerenderLive) previewCanvas.hidden = true;
+  else {
+    retirePrerender();
+    requestPreview();
+  }
+  ensure();
+}
+
+/** Queue the coarse preview ahead of the detailed request so it paints first. */
+function requestPreview() {
   const first = request(ZOOM - PREVIEW_DROP, PREVIEW_SCALE, 1, false);
   previewId = first.id;
   worker.postMessage(first);
-  ensure();
 }
+
+// A missing or broken render falls back to the coarse preview.
+prerenderImg?.addEventListener('error', () => {
+  if (!prerenderLive) return;
+  retirePrerender();
+  if (!scene) {
+    previewCanvas.hidden = false;
+    requestPreview();
+  }
+});
 
 worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress>) => {
   const msg = e.data;
@@ -203,7 +344,9 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress>) => {
   document.body.classList.remove('busy');
   const features = buildFeatures(ctx, msg.tiles, msg.labels, msg.width, msg.height);
   scene = buildScene(msg, features, DS);
+  atlas.addPeaks(msg.labels, msg.originX, msg.originY);
   updateLegend(scene.lo, scene.hi);
+  if (!document.body.classList.contains('loaded')) settleArrival();
   reveal();
   requestDraw();
   ensure();
@@ -225,6 +368,7 @@ canvas.addEventListener('pointermove', (e) => {
   drag = { x: e.clientX, y: e.clientY };
   requestDraw();
   ensure();
+  syncUrl();
 });
 const endDrag = () => {
   drag = null;
@@ -248,6 +392,7 @@ window.addEventListener('keydown', (e) => {
   cy += d[1];
   requestDraw();
   ensure();
+  syncUrl();
 });
 
 // No zoom, by design.
@@ -255,9 +400,19 @@ window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 window.addEventListener('resize', resize);
-createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) => arrive(place));
+createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) =>
+  arrive(place, { push: true, announce: true }),
+);
+createShare(document.querySelector<HTMLButtonElement>('#share')!, () => {
+  const link = currentLink();
+  history.replaceState(null, '', link.url);
+  return { url: location.href, title: link.title };
+});
+const landing = () => readSpot() ?? pageSpot ?? START;
+window.addEventListener('popstate', () => arrive(landing(), { announce: true }));
 
 w = window.innerWidth;
 h = window.innerHeight;
-arrive(START);
+// A shared link lands where it was shared from; otherwise the page's own place.
+arrive(landing());
 resize();

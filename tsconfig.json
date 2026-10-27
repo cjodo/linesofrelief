@@ -6,10 +6,11 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src"]
+  "include": ["src", "site"]
 }

@@ -34,18 +34,17 @@ export const INK = {
 export const SERIF = '"Instrument Serif", Georgia, serif';
 export const MONO = '"JetBrains Mono", ui-monospace, monospace';
 
-export const tileUrl = (z: number, x: number, y: number) =>
-  `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
-
-/** OpenFreeMap (OpenMapTiles schema): free, keyless, CORS-open. */
-export const VECTOR_TILEJSON = 'https://tiles.openfreemap.org/planet';
-
-/** Photon (komoot), OSM-based geocoder built for type-ahead; free, keyless. */
-export const SEARCH_URL = 'https://photon.komoot.io/api/';
-export const SEARCH_TAGS = ['natural:peak', 'natural:volcano', 'natural:mountain_range', 'place:country'];
+// Everything external goes through the site's own server (crates/server),
+// which caches it in Redis for every visitor: AWS Terrain Tiles (elevation),
+// OpenFreeMap (water, borders, names) and Photon (search).
+export const terrainUrl = (z: number, x: number, y: number) => `/tiles/terrain/${z}/${x}/${y}.png`;
+export const vectorUrl = (z: number, x: number, y: number) => `/tiles/vector/${z}/${x}/${y}.pbf`;
+export const SEARCH_URL = '/api/search';
 
 // Caching: tiles are effectively immutable, so they're kept as long as storage allows.
-export const CACHE_NAME = 'tiles-v1';
+export const CACHE_NAME = 'tiles-v2';
+/** Earlier caches keyed by upstream URLs; cleared on first use. */
+export const STALE_CACHES = ['tiles-v1'];
 /** Max tiles (elevation PNG + vector PBF) kept in persistent Cache Storage. */
 export const PERSISTENT_TILES = 6000;
 /** Max decoded tiles of each kind held in worker memory. */
