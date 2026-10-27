@@ -37,14 +37,21 @@ export const MONO = '"JetBrains Mono", ui-monospace, monospace';
 // Everything external goes through the site's own server (crates/server),
 // which caches it in Redis for every visitor: AWS Terrain Tiles (elevation),
 // OpenFreeMap (water, borders, names) and Photon (search).
-export const terrainUrl = (z: number, x: number, y: number) => `/tiles/terrain/${z}/${x}/${y}.png`;
-export const vectorUrl = (z: number, x: number, y: number) => `/tiles/vector/${z}/${x}/${y}.pbf`;
+/**
+ * Bumping this re-keys every tile URL, bypassing CDN and browser caches that
+ * hold bad copies. (v2: a CDN cached the old static site's HTML at tile URLs.)
+ */
+export const TILE_VERSION = 2;
+export const terrainUrl = (z: number, x: number, y: number) =>
+  `/tiles/terrain/${z}/${x}/${y}.png?v=${TILE_VERSION}`;
+export const vectorUrl = (z: number, x: number, y: number) =>
+  `/tiles/vector/${z}/${x}/${y}.pbf?v=${TILE_VERSION}`;
 export const SEARCH_URL = '/api/search';
 
 // Caching: tiles are effectively immutable, so they're kept as long as storage allows.
-export const CACHE_NAME = 'tiles-v2';
+export const CACHE_NAME = 'tiles-v3';
 /** Earlier caches keyed by upstream URLs; cleared on first use. */
-export const STALE_CACHES = ['tiles-v1'];
+export const STALE_CACHES = ['tiles-v1', 'tiles-v2'];
 /** Max tiles (elevation PNG + vector PBF) kept in persistent Cache Storage. */
 export const PERSISTENT_TILES = 6000;
 /** Max decoded tiles of each kind held in worker memory. */

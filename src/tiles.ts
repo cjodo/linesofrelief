@@ -71,13 +71,19 @@ async function pruneDisk(cache: Cache) {
 }
 
 /** Fetch through the disk cache. */
-async function fetchCached(url: string): Promise<Response | null> {
+/**
+ * Fetch through the disk cache. Only a response of the expected type is
+ * cached or returned: anything else (say, an HTML page a CDN served at a tile
+ * URL) counts as a failure, so it's retried later instead of kept forever.
+ */
+async function fetchCached(url: string, type: string): Promise<Response | null> {
+  const isTile = (r: Response) => r.ok && (r.headers.get('content-type') ?? '').startsWith(type);
   const cache = await openDisk();
   const hit = await cache?.match(url);
-  if (hit) return hit;
+  if (hit && isTile(hit)) return hit;
 
   const res = await throttled(() => fetch(url));
-  if (!res.ok) return null;
+  if (!isTile(res)) throw new Error(`unexpected response for ${url}`);
   if (cache) {
     await cache.put(url, res.clone()).catch(() => {});
     if (++writesSincePrune >= 100) {
@@ -145,7 +151,7 @@ export function loadElevation(z: number, x: number, y: number): Promise<Float32A
     elevations,
     url,
     async () => {
-      const res = await fetchCached(url);
+      const res = await fetchCached(url, 'image/png');
       return res ? decodeElevation(await res.blob()) : flat;
     },
     flat,
@@ -281,7 +287,7 @@ export function loadVector(z: number, x: number, y: number): Promise<VectorData>
     vectors,
     url,
     async () => {
-      const res = await fetchCached(url);
+      const res = await fetchCached(url, 'application/x-protobuf');
       return res ? decodeVector(await res.arrayBuffer()) : emptyVector;
     },
     emptyVector,
