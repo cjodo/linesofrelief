@@ -1,5 +1,11 @@
 import { DS, MONO, SERIF, START, TILE, ZOOM } from './config';
-import type { SceneProgress, SceneRequest, SceneResult } from './contour.worker';
+import type {
+  NameRequest,
+  NameResult,
+  SceneProgress,
+  SceneRequest,
+  SceneResult,
+} from './contour.worker';
 import { Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
 import { buildFeatures, type Features } from './features';
 import { createLegend } from './legend';
@@ -281,8 +287,10 @@ function arrive(
   previewCanvas.hidden = false;
   pctx.clearRect(0, 0, w, h);
   intro.hidden = false;
-  intro.querySelector<HTMLElement>('.place')!.textContent =
-    place.name ?? shortLonLat(place.lat, place.lon);
+  intro.querySelector<HTMLElement>('.place')!.textContent = place.name ?? '\u00a0';
+  intro.classList.toggle('naming', !place.name);
+  nameId = -1;
+  if (!place.name) nameView();
   intro.querySelector<HTMLElement>('.detail')!.textContent = place.detail ?? '';
   intro.querySelector<HTMLElement>('.where')!.textContent = formatLonLat(place.lat, place.lon);
   introFill.style.transform = 'scaleX(0)';
@@ -323,8 +331,73 @@ prerenderImg?.addEventListener('error', () => {
   }
 });
 
-worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress>) => {
+// --- Naming a view that arrived without a name -------------------------------
+
+/** Summits this close to the centre (curated, or already indexed) name it at once. */
+const KNOWN_NAME_M = 10_000;
+/** A reverse-lookup result farther than this names the region, not the view. */
+const REVERSE_NEAR_KM = 25;
+let nameId = -1;
+
+/** Name the arrival: a known summit nearby, else the map tiles, else the server. */
+function nameView() {
+  const { lat } = worldToLonLat(cx, cy, ZOOM);
+  const mpp = (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** ZOOM);
+  const known = atlas.near(cx, cy, KNOWN_NAME_M / mpp);
+  if (known) return applyName(known.name, known.ele);
+  const req: NameRequest = { type: 'name', id: ++nextId, z: ZOOM, x: cx, y: cy };
+  nameId = req.id;
+  worker.postMessage(req);
+}
+
+async function named({ id, name, ele }: NameResult) {
+  if (id !== nameId) return; // a newer arrival took over
+  if (name) return applyName(name, ele);
+  // Nothing in the tiles (open sea, empty land): ask the server what's near.
+  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  let fallback: string | undefined;
+  try {
+    const res = await fetch(`/api/reverse?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`);
+    const f = (
+      (await res.json()) as {
+        features: { properties: Record<string, string>; geometry: { coordinates: number[] } }[];
+      }
+    ).features[0];
+    if (f) {
+      const [flon, flat] = f.geometry.coordinates;
+      const km = Math.hypot((flon - lon) * Math.cos((lat * Math.PI) / 180), flat - lat) * 111.32;
+      const p = f.properties;
+      fallback = (km <= REVERSE_NEAR_KM && p.name) || p.state || p.country;
+    }
+  } catch {
+    // offline or no server: coordinates it is
+  }
+  if (id !== nameId) return;
+  if (fallback) applyName(fallback);
+  else {
+    // Last resort: show coordinates, but they are not a name (URL, tab, card).
+    nameId = -1;
+    intro.querySelector<HTMLElement>('.place')!.textContent = shortLonLat(lat, lon);
+    intro.classList.remove('naming');
+  }
+}
+
+function applyName(name: string, ele?: number) {
+  nameId = -1;
+  intro.querySelector<HTMLElement>('.place')!.textContent = name;
+  if (ele !== undefined && !intro.querySelector<HTMLElement>('.detail')!.textContent) {
+    intro.querySelector<HTMLElement>('.detail')!.textContent = `${fmt.format(ele)} m`;
+  }
+  intro.classList.remove('naming');
+  arrival.name = name;
+  if (pendingCard) pendingCard.name = name;
+  if (!arrival.home) document.title = titleFor(name);
+  syncUrl();
+}
+
+worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResult>) => {
   const msg = e.data;
+  if (msg.type === 'named') return named(msg);
   if (msg.id === previewId) {
     if (msg.type === 'scene' && !scene) {
       preview = buildScene(msg, emptyFeatures, 1, PREVIEW_SCALE);

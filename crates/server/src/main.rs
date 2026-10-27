@@ -24,9 +24,12 @@ use tower_http::{compression::CompressionLayer, services::ServeDir};
 const TERRAIN: &str = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
 const VECTOR_TILEJSON: &str = "https://tiles.openfreemap.org/planet";
 const PHOTON: &str = "https://photon.komoot.io/api/";
+const PHOTON_REVERSE: &str = "https://photon.komoot.io/reverse";
 const SEARCH_TAGS: [&str; 4] = ["natural:peak", "natural:volcano", "natural:mountain_range", "place:country"];
 
 const DAY: u64 = 86_400;
+/// An empty GeoJSON FeatureCollection is ~44 bytes; tiles are far larger.
+const EMPTY_BYTES: usize = 64;
 
 /// How long each kind of object lives in Redis, and in browsers.
 struct Policy {
@@ -50,6 +53,13 @@ const VECTOR_POLICY: Policy = Policy {
 const SEARCH_POLICY: Policy = Policy {
     redis_ttl: DAY,
     cache_control: "public, max-age=3600",
+    content_type: "application/json",
+};
+
+/// Places don't move: a reverse lookup holds for a month.
+const REVERSE_POLICY: Policy = Policy {
+    redis_ttl: 30 * DAY,
+    cache_control: "public, max-age=86400",
     content_type: "application/json",
 };
 
@@ -96,6 +106,7 @@ async fn main() {
         .route("/tiles/terrain/{z}/{x}/{file}", get(terrain))
         .route("/tiles/vector/{z}/{x}/{file}", get(vector))
         .route("/api/search", get(search))
+        .route("/api/reverse", get(reverse))
         .with_state(app)
         .fallback_service(ServeDir::new(static_dir))
         .layer(CompressionLayer::new());
@@ -192,6 +203,34 @@ async fn search(State(app): State<Shared>, Query(SearchQuery { q }): Query<Searc
     .await
 }
 
+#[derive(Deserialize)]
+struct Point {
+    lat: f64,
+    lon: f64,
+}
+
+/// What is near this point? Fallback naming for views the map tiles can't name.
+async fn reverse(State(app): State<Shared>, Query(Point { lat, lon }): Query<Point>) -> Response {
+    if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    // ~1 km cells: nearby views share an answer.
+    let (lat, lon) = (format!("{lat:.2}"), format!("{lon:.2}"));
+    let key = format!("reverse:{lat},{lon}");
+    cached(&app, &key, &REVERSE_POLICY, || async move {
+        let mut url = reqwest::Url::parse(PHOTON_REVERSE)?;
+        url.query_pairs_mut()
+            .append_pair("lat", &lat)
+            .append_pair("lon", &lon)
+            .append_pair("limit", "1")
+            .append_pair("lang", "en")
+            // Wide, for empty land; the client names the region if it's far.
+            .append_pair("radius", "500");
+        Ok(url.to_string())
+    })
+    .await
+}
+
 // --- Cache ---------------------------------------------------------------------
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -218,8 +257,11 @@ where
     match fetched {
         Ok(body) => {
             if let Some(mut redis) = app.redis.clone() {
+                // Empty answers (no search hits, nothing nearby) are cheap to
+                // ask again and may change, so they only keep for a day.
+                let ttl = if body.len() < EMPTY_BYTES { policy.redis_ttl.min(DAY) } else { policy.redis_ttl };
                 // A failed write only costs a refetch later.
-                let _: Result<(), _> = redis.set_ex(key, body.as_slice(), policy.redis_ttl).await;
+                let _: Result<(), _> = redis.set_ex(key, body.as_slice(), ttl).await;
             }
             respond(body, policy, "miss")
         }

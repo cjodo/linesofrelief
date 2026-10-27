@@ -170,6 +170,8 @@ export interface Label {
   /** Lower is more important. */
   rank: number;
   ele?: number;
+  /** OpenMapTiles class, e.g. 'ocean' / 'sea' / 'lake' for water names. */
+  cls?: string;
 }
 
 export interface VectorData {
@@ -260,7 +262,7 @@ function decodeVector(buf: ArrayBuffer): VectorData {
     const part = f.loadGeometry()[0];
     const pt = part?.[Math.floor(part.length / 2)];
     if (name && pt) {
-      labels.push({ kind: 'water', name, x: pt.x * s, y: pt.y * s, rank: Number(f.properties.rank ?? 99) });
+      labels.push({ kind: 'water', name, x: pt.x * s, y: pt.y * s, rank: Number(f.properties.rank ?? 99), cls: String(f.properties.class ?? '') });
     }
   });
 

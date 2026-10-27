@@ -354,6 +354,14 @@ body {
   }
 }
 
+/* A nameless arrival keeps the title's space until its name is known. */
+.intro .place {
+  transition: opacity 0.6s ease;
+}
+.intro.naming .place {
+  opacity: 0;
+}
+
 /* A search arrival lets the discovery card name the place. */
 .intro.transit .place,
 .intro.transit .detail {
