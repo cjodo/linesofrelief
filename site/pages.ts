@@ -177,9 +177,18 @@ export function hubPage(site: string): Page {
 // --- HTML pieces -------------------------------------------------------------
 
 /** Everything page-specific in <head>. */
-export function headTags(page: Page, site: string): string {
+/**
+ * `version` returns a content hash for a public file: appended to the share
+ * image URL so platforms that cache previews for weeks pick up re-renders.
+ */
+export function headTags(
+  page: Page,
+  site: string,
+  version: (path: string) => string | undefined = () => undefined,
+): string {
   const url = `${site}${page.path}`;
-  const image = `${site}${page.image}`;
+  const v = version(page.image);
+  const image = `${site}${page.image}${v ? `?v=${v}` : ''}`;
   return [
     `<title>${esc(page.title)}</title>`,
     `<meta name="description" content="${esc(page.description)}" />`,
@@ -190,10 +199,13 @@ export function headTags(page: Page, site: string): string {
     `<meta property="og:description" content="${esc(page.description)}" />`,
     `<meta property="og:url" content="${url}" />`,
     `<meta property="og:image" content="${image}" />`,
+    `<meta property="og:image:type" content="image/jpeg" />`,
     `<meta property="og:image:width" content="1200" />`,
     `<meta property="og:image:height" content="630" />`,
     `<meta property="og:image:alt" content="${esc(page.imageAlt)}" />`,
     `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:image" content="${image}" />`,
+    `<meta name="twitter:image:alt" content="${esc(page.imageAlt)}" />`,
     // The pre-rendered map is the first paint; fetch it before anything else.
     ...(page.prerender
       ? (Object.keys(PRERENDER) as (keyof typeof PRERENDER)[]).map(
@@ -237,7 +249,12 @@ export function htmlAttrs(page: Page): string {
 }
 
 /** The /mountains/ index: a typographic list, tallest first. */
-export function hubHtml(site: string, stylesheet: string, favicon: string): string {
+export function hubHtml(
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version?: (path: string) => string | undefined,
+): string {
   const page = hubPage(site);
   const max = Math.max(...PEAKS.map((p) => p.ele));
   const items = [...PEAKS]
@@ -261,7 +278,7 @@ export function hubHtml(site: string, stylesheet: string, favicon: string): stri
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#191724" />
-${headTags(page, site)}
+${headTags(page, site, version)}
     ${favicon}
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="${stylesheet}" />

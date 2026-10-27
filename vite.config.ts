@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
@@ -29,6 +30,13 @@ const hasPrerender = (key: string) =>
 const root = () => rootPage(SITE_URL, START, hasPrerender('home'));
 const summit = (p: Peak) => peakPage(p, SITE_URL, hasImage(p), hasPrerender(p.slug));
 
+/** Short content hash of a file in public/, if it exists. */
+function publicVersion(path: string): string | undefined {
+  const file = resolve(__dirname, 'public', path.replace(/^\//, ''));
+  if (!existsSync(file)) return undefined;
+  return createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 10);
+}
+
 const hasImage = (p: Peak) => existsSync(resolve(__dirname, 'public/og', `${p.slug}.jpg`));
 
 /** Fill the template's marked regions for one page. */
@@ -38,7 +46,7 @@ function render(html: string, page: Page): string {
       new RegExp(`<!-- ${name} -->[\\s\\S]*?<!-- /${name} -->`),
       () => `<!-- ${name} -->\n${content}\n    <!-- /${name} -->`,
     );
-  let out = region(html, 'seo', headTags(page, SITE_URL));
+  let out = region(html, 'seo', headTags(page, SITE_URL, publicVersion));
   out = region(out, 'about', page.about ?? '');
   out = region(out, 'prerender', prerenderHtml(page));
   return out.replace(/<html[^>]*>/, () => `<html lang="en"${htmlAttrs(page)}>`);
@@ -72,7 +80,7 @@ function sitePages(): Plugin {
               summit(peak),
             );
           } else {
-            html = hubHtml(SITE_URL, '/src/style.css', faviconOf(template));
+            html = hubHtml(SITE_URL, '/src/style.css', faviconOf(template, publicVersion));
           }
           res.setHeader('Content-Type', 'text/html');
           res.end(html);
@@ -102,7 +110,7 @@ function sitePages(): Plugin {
         this.emitFile({
           type: 'asset',
           fileName: 'mountains/index.html',
-          source: hubHtml(SITE_URL, stylesheet, favicon),
+          source: hubHtml(SITE_URL, stylesheet, favicon, publicVersion),
         });
         this.emitFile({
           type: 'asset',
