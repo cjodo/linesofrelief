@@ -490,6 +490,16 @@ body:has(.search.searching) .loading-bar {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.share.export {
+  right: calc(max(16px, 2.5vw) + 48px);
+}
+.share:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.share.working svg {
+  animation: pulse 1s ease-in-out infinite;
+}
 .share .toast {
   position: absolute;
   top: calc(100% + 8px);
@@ -539,9 +549,9 @@ body:has(.search.searching) .loading-bar {
 .search {
   position: fixed;
   top: max(16px, 2.5vw);
-  right: calc(max(16px, 2.5vw) + 48px);
+  right: calc(max(16px, 2.5vw) + 96px);
   z-index: 5;
-  width: min(320px, calc(100vw - 80px));
+  width: min(320px, calc(100vw - 128px));
 }
 .search .glass {
   position: absolute;
@@ -919,11 +929,14 @@ body:not(.loaded) .coords {
   .search {
     top: 52px;
     left: 16px;
-    right: 64px;
+    right: 112px;
     width: auto;
   }
   .share {
     top: 52px;
+  }
+  .share.export {
+    right: 64px;
   }
   .intro {
     top: 120px;

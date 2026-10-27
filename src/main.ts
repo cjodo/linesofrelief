@@ -11,6 +11,7 @@ import { buildFeatures, labelKey, type Features } from './features';
 import { createLegend } from './legend';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
+import { createExport } from './export';
 import { createShare } from './share';
 import { pageSpot, readSpot, spotUrl, type Spot } from './url';
 import { lonLatToWorld, worldToLonLat } from './tiles';
@@ -287,6 +288,7 @@ function arrive(
   scene = null;
   preview = null;
   detailId = -1;
+  exportButton.disabled = true;
   range = null;
   lead.x = lead.y = 0;
 
@@ -430,6 +432,7 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
   scene = buildScene(msg, features, DS, 1, range ?? undefined);
   range ??= { lo: scene.lo, hi: scene.hi };
+  exportButton.disabled = false;
   atlas.addPeaks(msg.labels, msg.originX, msg.originY);
   updateLegend(scene.lo, scene.hi);
   if (!document.body.classList.contains('loaded')) settleArrival();
@@ -500,6 +503,14 @@ createShare(document.querySelector<HTMLButtonElement>('#share')!, () => {
   history.replaceState(null, '', link.url);
   return { url: location.href, title: link.title };
 });
+const exportButton = document.querySelector<HTMLButtonElement>('#export')!;
+createExport(exportButton, () => {
+  if (!scene) return null;
+  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  const near = Math.hypot(cx - arrival.x, cy - arrival.y) < Math.max(w, h) / 2;
+  return { scene, x: cx - w / 2, y: cy - h / 2, w, h, name: near ? arrival.name : undefined, lat, lon };
+});
+
 const landing = () => readSpot() ?? pageSpot ?? START;
 window.addEventListener('popstate', () => arrive(landing(), { announce: true }));
 
