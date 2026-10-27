@@ -7,11 +7,21 @@ PORT       ?= 8080
 
 .PHONY: dev build serve server wasm og prerender verify clean
 
+# Start the server (next free port if $(PORT) is taken), wait until it has
+# written the port it bound, and leave it in $$port / its pid in $$pid.
+define start-server
+	portfile=$$(mktemp); rm -f $$portfile; \
+	PORT=$(PORT) PORT_FILE=$$portfile STATIC_DIR=dist $(SERVER) $(1) & pid=$$!; \
+	for _ in $$(seq 100); do [ -s $$portfile ] && break; sleep 0.1; done; \
+	port=$$(cat $$portfile 2>/dev/null); rm -f $$portfile; \
+	[ -n "$$port" ] || { echo "server did not start"; kill $$pid 2>/dev/null; exit 1; }
+endef
+
 ## dev: Vite dev server plus the Rust tile/search server it proxies to
 ##      (Redis optional: REDIS_URL, default redis://127.0.0.1:6379)
 dev: node_modules $(WASM) $(SERVER)
-	@PORT=$(PORT) $(SERVER) & pid=$$!; trap 'kill $$pid' EXIT INT TERM; \
-	API_ORIGIN=http://localhost:$(PORT) npx vite
+	@$(call start-server); trap 'kill $$pid' EXIT INT TERM; \
+	API_ORIGIN=http://localhost:$$port npx vite
 
 ## build: production build into dist/
 build: node_modules $(WASM)
@@ -29,8 +39,8 @@ $(SERVER): $(SERVER_SRC)
 
 # Runs a page-rendering script against the real server (which also warms its cache).
 define with-server
-	@PORT=$(PORT) STATIC_DIR=dist $(SERVER) >/dev/null 2>&1 & pid=$$!; \
-	sleep 1; BASE=http://localhost:$(PORT) node $(1) $(SLUGS); status=$$?; kill $$pid; exit $$status
+	@$(call start-server,>/dev/null 2>&1); \
+	BASE=http://localhost:$$port node $(1) $(SLUGS); status=$$?; kill $$pid; exit $$status
 endef
 
 ## og: render social preview images (public/og*.jpg), then rebuild

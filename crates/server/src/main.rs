@@ -2,8 +2,10 @@
 //! (elevation tiles, map tiles, place search) through a Redis cache shared by
 //! every visitor, so each upstream object is fetched once, not once per client.
 //!
-//! Env: PORT (8080), REDIS_URL (redis://127.0.0.1:6379), STATIC_DIR (dist).
-//! Without Redis it still works, as a plain proxy.
+//! Env: PORT (8080), REDIS_URL (redis://127.0.0.1:6379), STATIC_DIR (dist),
+//! PORT_FILE (optional: the port actually bound is written there).
+//! If PORT is taken, the next free port is used. Without Redis it still
+//! works, as a plain proxy.
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -98,10 +100,31 @@ async fn main() {
         .fallback_service(ServeDir::new(static_dir))
         .layer(CompressionLayer::new());
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
+    let listener = bind(port).await;
+    let port = listener.local_addr().expect("local addr").port();
+    if let Ok(file) = std::env::var("PORT_FILE") {
+        std::fs::write(&file, port.to_string()).expect("write PORT_FILE");
+    }
     println!("topography server on http://localhost:{port}");
     axum::serve(listener, router).await.expect("serve");
+}
+
+/// Bind `port`, or the next free one after it if it's already in use.
+async fn bind(port: u16) -> tokio::net::TcpListener {
+    const TRIES: u16 = 20;
+    for p in port..port.saturating_add(TRIES) {
+        match tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], p))).await {
+            Ok(listener) => {
+                if p != port {
+                    eprintln!("port {port} is in use; using {p}");
+                }
+                return listener;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(e) => panic!("bind {p}: {e}"),
+        }
+    }
+    panic!("no free port in {port}..{}", port.saturating_add(TRIES));
 }
 
 // --- Routes ------------------------------------------------------------------
