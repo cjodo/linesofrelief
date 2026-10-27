@@ -92,21 +92,32 @@ const kernel: Promise<Kernel> = WebAssembly.instantiateStreaming(fetch(wasmUrl))
   .then(({ instance }) => instance.exports as unknown as Kernel);
 
 function contour(k: Kernel, tiles: Float32Array[], cols: number, rows: number, ds: number) {
-  const width = cols * TILE;
-  const height = rows * TILE;
-  // Stitch straight into wasm memory; views are re-created after each call
-  // because memory growth detaches them.
+  // Stitch and downsample (ds×ds averages) in one pass, straight into wasm
+  // memory: the kernel's input is then ds² smaller than the raw tiles.
+  const cell = TILE / ds;
+  const width = cols * cell;
+  const height = rows * cell;
+  const norm = 1 / (ds * ds);
+  // Views are re-created after each call because memory growth detaches them.
   const ptr = k.input_ptr(width * height); // may grow memory: call before reading .buffer
   const grid = new Float32Array(k.memory.buffer, ptr, width * height);
   tiles.forEach((tile, n) => {
-    const ox = (n % cols) * TILE;
-    const oy = Math.floor(n / cols) * TILE;
-    for (let y = 0; y < TILE; y++) {
-      grid.set(tile.subarray(y * TILE, (y + 1) * TILE), (oy + y) * width + ox);
+    const ox = (n % cols) * cell;
+    const oy = Math.floor(n / cols) * cell;
+    for (let y = 0; y < cell; y++) {
+      const out = (oy + y) * width + ox;
+      for (let x = 0; x < cell; x++) {
+        let sum = 0;
+        for (let dy = 0; dy < ds; dy++) {
+          const row = (y * ds + dy) * TILE + x * ds;
+          for (let dx = 0; dx < ds; dx++) sum += tile[row + dx];
+        }
+        grid[out + x] = sum * norm;
+      }
     }
   });
 
-  k.run(width, height, ds, MINOR, SIMPLIFY);
+  k.run(width, height, 1, MINOR, SIMPLIFY);
 
   const meta = new Uint32Array(k.memory.buffer, k.meta_ptr(), k.meta_len());
   const coords = new Float32Array(k.memory.buffer, k.coords_ptr(), k.coords_len());
@@ -263,4 +274,16 @@ self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest>) => {
   };
   // Contour buffers are fresh copies; vector buffers stay cached, so they're cloned.
   self.postMessage(result, { transfer: levels.flatMap((l) => [l.coords.buffer, l.parts.buffer]) });
+
+  // Warm the ring of tiles just beyond this region, so the next one (the
+  // user is panning toward it) comes from cache instead of the network.
+  if (features) {
+    for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) {
+      for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
+        if (tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1) continue;
+        void loadElevation(z, tx, ty);
+        void loadVector(z, tx, ty);
+      }
+    }
+  }
 };

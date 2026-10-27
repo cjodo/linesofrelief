@@ -69,10 +69,20 @@ export interface Scene {
   features: Features;
 }
 
-export function buildScene(r: SceneResult, features: Features, ds: number, scale = 1): Scene {
+/**
+ * `range` pins the colour scale (so panning into a new region doesn't recolour
+ * what's on screen); without it the scale fits this scene.
+ */
+export function buildScene(
+  r: SceneResult,
+  features: Features,
+  ds: number,
+  scale = 1,
+  range?: { lo: number; hi: number },
+): Scene {
   // Snap the colour range to index contours so the legend reads cleanly.
-  const lo = Math.floor(r.min / MAJOR) * MAJOR;
-  const hi = Math.max(lo + MAJOR, Math.ceil(r.max / MAJOR) * MAJOR);
+  const lo = range?.lo ?? Math.floor(r.min / MAJOR) * MAJOR;
+  const hi = range?.hi ?? Math.max(lo + MAJOR, Math.ceil(r.max / MAJOR) * MAJOR);
   return {
     originX: r.originX,
     originY: r.originY,

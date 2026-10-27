@@ -84,9 +84,22 @@ function overlaps(a: PlacedLabel['box'], b: PlacedLabel['box'], gap: number) {
  * Greedy, priority-ordered placement. The scale is fixed, so this runs once
  * per scene rather than per frame.
  */
-function placeLabels(ctx: CanvasRenderingContext2D, labels: Label[], w: number, h: number) {
+export const labelKey = (l: Label) => `${l.kind}:${l.name}`;
+
+/**
+ * Labels already on screen (`keep`) are placed first so a new region doesn't
+ * shuffle them.
+ */
+function placeLabels(
+  ctx: CanvasRenderingContext2D,
+  labels: Label[],
+  w: number,
+  h: number,
+  keep: Set<string>,
+) {
+  const kept = (l: Label) => (keep.has(labelKey(l)) ? 0 : 1);
   const sorted = [...labels].sort(
-    (a, b) => STYLE[a.kind].order - STYLE[b.kind].order || a.rank - b.rank,
+    (a, b) => kept(a) - kept(b) || STYLE[a.kind].order - STYLE[b.kind].order || a.rank - b.rank,
   );
   const placed: PlacedLabel[] = [];
   ctx.save();
@@ -122,6 +135,7 @@ export function buildFeatures(
   labels: Label[],
   width: number,
   height: number,
+  keep: Set<string> = new Set(),
 ): Features {
   return {
     tiles: tiles.map((t) => ({
@@ -132,7 +146,7 @@ export function buildFeatures(
       river: pathOf(t.river),
       border: pathOf(t.border),
     })),
-    labels: placeLabels(ctx, labels, width, height),
+    labels: placeLabels(ctx, labels, width, height, keep),
   };
 }
 

@@ -7,7 +7,7 @@ import type {
   SceneResult,
 } from './contour.worker';
 import { Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
-import { buildFeatures, type Features } from './features';
+import { buildFeatures, labelKey, type Features } from './features';
 import { createLegend } from './legend';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
@@ -15,10 +15,14 @@ import { createShare } from './share';
 import { pageSpot, readSpot, spotUrl, type Spot } from './url';
 import { lonLatToWorld, worldToLonLat } from './tiles';
 
-/** Extra world pixels fetched beyond the viewport on each side. */
-const MARGIN = 128;
-/** Request a new region once the view comes this close to its edge. */
-const TRIGGER = 96;
+/** World pixels drawn beyond the viewport on every side. */
+const MARGIN = 384;
+/** Request the next region while this much drawn map is still left ahead. */
+const TRIGGER = 256;
+/** Extra reach in the direction of travel, at full speed. */
+const LEAD_MAX = 384;
+/** How strongly recent pan speed turns into lead (per move event). */
+const LEAD_GAIN = 6;
 /**
  * The first paint is the same place a few zoom levels coarser: a handful of
  * tiles, contoured in milliseconds, which the full map then resolves over.
@@ -72,6 +76,8 @@ let cy = 0;
 let w = 0;
 let h = 0;
 let scene: Scene | null = null;
+/** The colour scale of the current arrival (see the scene handler). */
+let range: { lo: number; hi: number } | null = null;
 let preview: Scene | null = null;
 let nextId = 0;
 /** In-flight requests we still care about; anything else is stale. */
@@ -171,10 +177,11 @@ function settleArrival() {
 
 /** Tiles at zoom `z` covering the view (plus margin), `k` screen px per tile px. */
 function request(z: number, k: number, ds: number, features: boolean): SceneRequest {
-  const x0 = (cx - w / 2 - MARGIN) / k;
-  const y0 = (cy - h / 2 - MARGIN) / k;
-  const x1 = (cx + w / 2 + MARGIN) / k;
-  const y1 = (cy + h / 2 + MARGIN) / k;
+  // The region leans toward where the view is heading.
+  const x0 = (cx - w / 2 - MARGIN - Math.max(0, -lead.x)) / k;
+  const y0 = (cy - h / 2 - MARGIN - Math.max(0, -lead.y)) / k;
+  const x1 = (cx + w / 2 + MARGIN + Math.max(0, lead.x)) / k;
+  const y1 = (cy + h / 2 + MARGIN + Math.max(0, lead.y)) / k;
   const max = 2 ** z - 1;
   return {
     id: ++nextId,
@@ -280,6 +287,8 @@ function arrive(
   scene = null;
   preview = null;
   detailId = -1;
+  range = null;
+  lead.x = lead.y = 0;
 
   document.body.classList.remove('loaded');
   canvas.classList.remove('ready');
@@ -415,8 +424,12 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   if (msg.id !== detailId) return;
   detailId = -1;
   document.body.classList.remove('busy');
-  const features = buildFeatures(ctx, msg.tiles, msg.labels, msg.width, msg.height);
-  scene = buildScene(msg, features, DS);
+  const keep = new Set(scene?.features.labels.map((p) => labelKey(p.label)));
+  const features = buildFeatures(ctx, msg.tiles, msg.labels, msg.width, msg.height, keep);
+  // One colour scale per arrival; re-fit only on reaching wholly new terrain.
+  if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
+  scene = buildScene(msg, features, DS, 1, range ?? undefined);
+  range ??= { lo: scene.lo, hi: scene.hi };
   atlas.addPeaks(msg.labels, msg.originX, msg.originY);
   updateLegend(scene.lo, scene.hi);
   if (!document.body.classList.contains('loaded')) settleArrival();
@@ -427,6 +440,20 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
 
 // --- Panning only. Scale is fixed. -----------------------------------------
 
+/** Recent direction and speed of travel, in world pixels (see request()). */
+const lead = { x: 0, y: 0 };
+const clampLead = (v: number) => Math.max(-LEAD_MAX, Math.min(LEAD_MAX, v));
+
+function move(dx: number, dy: number) {
+  cx += dx;
+  cy += dy;
+  lead.x = clampLead(lead.x * 0.7 + dx * LEAD_GAIN);
+  lead.y = clampLead(lead.y * 0.7 + dy * LEAD_GAIN);
+  requestDraw();
+  ensure();
+  syncUrl();
+}
+
 let drag: { x: number; y: number } | null = null;
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -436,12 +463,8 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!drag) return;
-  cx -= e.clientX - drag.x;
-  cy -= e.clientY - drag.y;
+  move(drag.x - e.clientX, drag.y - e.clientY);
   drag = { x: e.clientX, y: e.clientY };
-  requestDraw();
-  ensure();
-  syncUrl();
 });
 const endDrag = () => {
   drag = null;
@@ -461,11 +484,7 @@ window.addEventListener('keydown', (e) => {
   const d = KEYS[e.key];
   if (!d || e.target instanceof HTMLInputElement) return;
   e.preventDefault();
-  cx += d[0];
-  cy += d[1];
-  requestDraw();
-  ensure();
-  syncUrl();
+  move(d[0], d[1]);
 });
 
 // No zoom, by design.
