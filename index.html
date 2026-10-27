@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#191724" />
+    <title>Topography</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23191724%27/%3E%3Cg fill=%27none%27 stroke-width=%271.6%27%3E%3Cellipse cx=%2716%27 cy=%2717%27 rx=%2712%27 ry=%279%27 stroke=%27%239ccfd8%27/%3E%3Cellipse cx=%2716%27 cy=%2716%27 rx=%277.5%27 ry=%275.5%27 stroke=%27%23c4a7e7%27/%3E%3Cellipse cx=%2716%27 cy=%2715%27 rx=%273%27 ry=%272.2%27 stroke=%27%23f6c177%27/%3E%3C/g%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://s3.amazonaws.com" crossorigin />
+    <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
+  </head>
+  <body>
+    <div class="loading-bar" aria-hidden="true"></div>
+    <canvas id="preview" aria-hidden="true"></canvas>
+    <canvas id="map" aria-label="Contour map of terrain elevation"></canvas>
+    <div class="vignette" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+    <aside id="legend" class="legend"></aside>
+    <p class="credits">
+      Elevation <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> ·
+      <a href="https://openfreemap.org">OpenFreeMap</a> ·
+      <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> ·
+      <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>
+    </p>
+    <p class="coords"><span class="pulse" aria-hidden="true"></span><span id="coords"></span></p>
+    <form id="search" class="search" role="search" onsubmit="return false">
+      <svg class="glass" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></svg>
+      <input
+        type="search"
+        placeholder="Find a summit or country"
+        aria-label="Find a summit or country"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-controls="results"
+        aria-expanded="false"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <kbd aria-hidden="true">/</kbd>
+      <ul id="results" role="listbox" hidden></ul>
+    </form>
+    <section id="intro" class="intro" role="status" aria-live="polite">
+      <p class="eyebrow">Topography</p>
+      <h1 class="place"></h1>
+      <p class="where"></p>
+      <div class="track"><div class="fill"></div></div>
+      <p class="status">Surveying</p>
+    </section>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
