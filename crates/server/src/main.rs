@@ -28,6 +28,9 @@ const PHOTON_REVERSE: &str = "https://photon.komoot.io/reverse";
 const SEARCH_TAGS: [&str; 4] = ["natural:peak", "natural:volcano", "natural:mountain_range", "place:country"];
 
 const DAY: u64 = 86_400;
+/// Redis is a cache: never let a missing or slow one hold up startup or a request.
+const REDIS_CONNECT: Duration = Duration::from_secs(3);
+const REDIS_OP: Duration = Duration::from_millis(500);
 /// An empty GeoJSON FeatureCollection is ~44 bytes; tiles are far larger.
 const EMPTY_BYTES: usize = 64;
 
@@ -78,11 +81,19 @@ async fn main() {
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "dist".into());
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
 
+    // The connection manager retries forever on its own, so bound the first connect.
     let redis = match redis::Client::open(redis_url.as_str()) {
-        Ok(client) => match ConnectionManager::new(client).await {
-            Ok(manager) => Some(manager),
-            Err(e) => {
+        Ok(client) => match tokio::time::timeout(REDIS_CONNECT, ConnectionManager::new(client)).await {
+            Ok(Ok(manager)) => {
+                println!("redis cache: {}", redis_url.split('@').last().unwrap_or_default());
+                Some(manager)
+            }
+            Ok(Err(e)) => {
                 eprintln!("redis unavailable ({e}); running without the shared cache");
+                None
+            }
+            Err(_) => {
+                eprintln!("redis did not answer in {REDIS_CONNECT:?}; running without the shared cache");
                 None
             }
         },
@@ -242,7 +253,8 @@ where
     Fut: std::future::Future<Output = Result<String, BoxError>>,
 {
     if let Some(mut redis) = app.redis.clone() {
-        if let Ok(Some(body)) = redis.get::<_, Option<Vec<u8>>>(key).await {
+        let get = tokio::time::timeout(REDIS_OP, redis.get::<_, Option<Vec<u8>>>(key));
+        if let Ok(Ok(Some(body))) = get.await {
             return respond(body, policy, "hit");
         }
     }
@@ -260,8 +272,9 @@ where
                 // Empty answers (no search hits, nothing nearby) are cheap to
                 // ask again and may change, so they only keep for a day.
                 let ttl = if body.len() < EMPTY_BYTES { policy.redis_ttl.min(DAY) } else { policy.redis_ttl };
-                // A failed write only costs a refetch later.
-                let _: Result<(), _> = redis.set_ex(key, body.as_slice(), ttl).await;
+                // A failed or slow write only costs a refetch later.
+                let set = redis.set_ex::<_, _, ()>(key, body.as_slice(), ttl);
+                let _ = tokio::time::timeout(REDIS_OP, set).await;
             }
             respond(body, policy, "miss")
         }
