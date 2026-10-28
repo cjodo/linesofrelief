@@ -13,6 +13,7 @@ import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
+import { greet } from './banner';
 import { createExport } from './export';
 import { createShare } from './share';
 import { settable } from './text';
@@ -801,6 +802,8 @@ createExport(exportButton, () => {
 
 const landing = () => readSpot() ?? pageSpot ?? START;
 window.addEventListener('popstate', () => arrive(landing(), { announce: true }));
+
+greet();
 
 w = window.innerWidth;
 h = window.innerHeight;
