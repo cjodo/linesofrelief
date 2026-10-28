@@ -10,8 +10,9 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, Request, State},
     http::{header, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -120,6 +121,7 @@ async fn main() {
         .route("/api/reverse", get(reverse))
         .with_state(app)
         .fallback_service(ServeDir::new(static_dir))
+        .layer(middleware::from_fn(browser_cache))
         .layer(CompressionLayer::new());
 
     let listener = bind(port).await;
@@ -240,6 +242,32 @@ async fn reverse(State(app): State<Shared>, Query(Point { lat, lon }): Query<Poi
         Ok(url.to_string())
     })
     .await
+}
+
+/// Let browsers keep the site's own files: hashed build assets for a year,
+/// pages revalidated every load (so a deploy shows at once), the rest a while.
+/// Routes that set their own Cache-Control (tiles, API) keep it.
+async fn browser_cache(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    let mut res = next.run(req).await;
+    if !res.status().is_success() || res.headers().contains_key(header::CACHE_CONTROL) {
+        return res;
+    }
+    let policy = if path.starts_with("/assets/") {
+        "public, max-age=31536000, immutable"
+    } else if path.ends_with('/') || path.ends_with(".html") {
+        "no-cache"
+    } else if path.starts_with("/og/")
+        || path.starts_with("/prerender/")
+        || path.ends_with(".png")
+        || path.ends_with(".jpg")
+    {
+        "public, max-age=86400"
+    } else {
+        "public, max-age=3600"
+    };
+    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+    res
 }
 
 // --- Cache ---------------------------------------------------------------------
