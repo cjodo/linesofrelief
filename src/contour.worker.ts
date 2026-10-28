@@ -2,6 +2,7 @@ import { SIMPLIFY, TILE } from './config';
 import {
   loadElevation,
   loadVector,
+  startGroup,
   worldToLonLat,
   type Geometry,
   type Label,
@@ -272,10 +273,18 @@ self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest>) => {
   const grid = (x0: number, y0: number, cols: number, rows: number) =>
     Array.from({ length: cols * rows }, (_, n) => ({ x: x0 + (n % cols), y: y0 + Math.floor(n / cols) }));
 
+  // This request replaces the last of its kind: tiles queued only for that one
+  // are skipped (the view has moved on), tiles both want are kept.
+  const group = features ? 'detail' : 'preview';
+  startGroup(group);
   const [elevation, vector, k] = await Promise.all([
-    Promise.all(grid(ex0, ey0, ecols, erows).map(({ x, y }) => loadElevation(ez, x, y).then(tick))),
+    Promise.all(
+      grid(ex0, ey0, ecols, erows).map(({ x, y }) => loadElevation(ez, x, y, group).then(tick)),
+    ),
     features
-      ? Promise.all(grid(vx0, vy0, vcols, vrows).map(({ x, y }) => loadVector(vz, x, y).then(tick)))
+      ? Promise.all(
+          grid(vx0, vy0, vcols, vrows).map(({ x, y }) => loadVector(vz, x, y, group).then(tick)),
+        )
       : [],
     kernel,
   ]);

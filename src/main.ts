@@ -225,23 +225,40 @@ function request(z: number, k: number, ds: number, features: boolean): SceneRequ
 
 /** Make sure the current scene covers the view; otherwise ask the worker for one. */
 function ensure() {
-  const x0 = cx - w / 2;
-  const y0 = cy - h / 2;
-  if (
-    scene &&
-    scene.zoom === zoom &&
-    x0 >= scene.originX + TRIGGER &&
-    y0 >= scene.originY + TRIGGER &&
-    x0 + w <= scene.originX + scene.width - TRIGGER &&
-    y0 + h <= scene.originY + scene.height - TRIGGER
-  ) {
-    return;
-  }
-  if (detailId !== -1) return; // re-checked when the in-flight scene lands
+  if (covers(scene)) return;
+  // A request in flight that will still cover the view: let it land. One for
+  // where the view used to be is superseded (the worker skips its queued
+  // tiles), rather than queued behind.
+  if (detailId !== -1 && covers(pending)) return;
   document.body.classList.add('busy');
   const req = request(zoom, 1, DS, true);
   detailId = req.id;
+  pending = {
+    zoom,
+    originX: req.tx0 * TILE,
+    originY: req.ty0 * TILE,
+    width: (req.tx1 - req.tx0 + 1) * TILE,
+    height: (req.ty1 - req.ty0 + 1) * TILE,
+  };
   worker.postMessage(req);
+}
+
+type Region = { zoom: number; originX: number; originY: number; width: number; height: number };
+/** The in-flight detailed request's region, while there is one. */
+let pending: Region | null = null;
+
+/** Whether a region at the view's zoom covers the view with TRIGGER to spare. */
+function covers(r: Region | null) {
+  const x0 = cx - w / 2;
+  const y0 = cy - h / 2;
+  return (
+    r !== null &&
+    r.zoom === zoom &&
+    x0 >= r.originX + TRIGGER &&
+    y0 >= r.originY + TRIGGER &&
+    x0 + w <= r.originX + r.width - TRIGGER &&
+    y0 + h <= r.originY + r.height - TRIGGER
+  );
 }
 
 function showProgress({ done, total }: SceneProgress) {
@@ -529,6 +546,7 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   await fontsReady;
   if (msg.id !== detailId) return;
   detailId = -1;
+  pending = null;
   document.body.classList.remove('busy');
   const keep = new Set(scene?.features.labels.map((p) => labelKey(p.label)));
   const features = buildFeatures(ctx, msg.tiles, msg.labels, msg.width, msg.height, keep);
@@ -552,14 +570,32 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
 const lead = { x: 0, y: 0 };
 const clampLead = (v: number) => Math.max(-LEAD_MAX, Math.min(LEAD_MAX, v));
 
+/**
+ * Above this pan speed (screen px per ms, smoothed) no new regions are
+ * requested: a fling would only queue tiles for places already left behind.
+ * The map catches up as soon as the pan slows, or SETTLE_MS after it stops.
+ */
+const FAST_PX_PER_MS = 1.5;
+const SETTLE_MS = 120;
+let speed = 0;
+let lastMoveAt = 0;
+let settleTimer = 0;
+
 function move(dx: number, dy: number) {
   cx += dx;
   cy += dy;
+  const now = performance.now();
+  const dt = now - lastMoveAt;
+  lastMoveAt = now;
+  const v = Math.hypot(dx, dy) / Math.max(dt, 1);
+  speed = dt > 100 ? v : speed * 0.6 + v * 0.4; // a pause restarts the average
   scheduleRegion();
   lead.x = clampLead(lead.x * 0.7 + dx * LEAD_GAIN);
   lead.y = clampLead(lead.y * 0.7 + dy * LEAD_GAIN);
   requestDraw();
-  ensure();
+  clearTimeout(settleTimer);
+  if (speed < FAST_PX_PER_MS) ensure();
+  else settleTimer = window.setTimeout(ensure, SETTLE_MS);
   syncUrl();
 }
 

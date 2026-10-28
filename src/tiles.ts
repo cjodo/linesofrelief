@@ -50,8 +50,26 @@ function openDisk() {
 
 let active = 0;
 const queue: (() => void)[] = [];
-async function throttled<T>(fn: () => Promise<T>): Promise<T> {
-  if (active >= MAX_CONCURRENT) await new Promise<void>((r) => queue.push(r));
+/**
+ * Which tiles the newest request of each group still wants. A new request
+ * restarts its group's set, so fetches queued for a superseded region (the
+ * view has moved on) are skipped before they reach the network. Loads with
+ * no group (naming, the minimap) always run.
+ */
+export type Group = 'detail' | 'preview';
+const wanted: Record<Group, Set<string>> = { detail: new Set(), preview: new Set() };
+export function startGroup(group: Group) {
+  wanted[group] = new Set();
+}
+
+async function throttled<T>(fn: () => Promise<T>, key?: string, group?: Group): Promise<T> {
+  if (active >= MAX_CONCURRENT) {
+    await new Promise<void>((r) => queue.push(r));
+    if (group && key && !wanted[group].has(key)) {
+      queue.shift()?.(); // hand our turn to the next in line
+      throw new Error(`superseded: ${key}`);
+    }
+  }
   active++;
   try {
     return await fn();
@@ -76,13 +94,13 @@ async function pruneDisk(cache: Cache) {
  * cached or returned: anything else (say, an HTML page a CDN served at a tile
  * URL) counts as a failure, so it's retried later instead of kept forever.
  */
-async function fetchCached(url: string, type: string): Promise<Response | null> {
+async function fetchCached(url: string, type: string, group?: Group): Promise<Response | null> {
   const isTile = (r: Response) => r.ok && (r.headers.get('content-type') ?? '').startsWith(type);
   const cache = await openDisk();
   const hit = await cache?.match(url);
   if (hit && isTile(hit)) return hit;
 
-  const res = await throttled(() => fetch(url));
+  const res = await throttled(() => fetch(url), url, group);
   if (!isTile(res)) throw new Error(`unexpected response for ${url}`);
   if (cache) {
     await cache.put(url, res.clone()).catch(() => {});
@@ -143,15 +161,16 @@ async function decodeElevation(blob: Blob): Promise<Float32Array> {
 }
 
 /** Elevation in metres for a tile, row-major TILE×TILE. Never rejects. */
-export function loadElevation(z: number, x: number, y: number): Promise<Float32Array> {
+export function loadElevation(z: number, x: number, y: number, group?: Group): Promise<Float32Array> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(flat);
   const url = terrainUrl(z, t.x, t.y);
+  if (group) wanted[group].add(url); // before the memo: a shared tile stays wanted
   return memoize(
     elevations,
     url,
     async () => {
-      const res = await fetchCached(url, 'image/png');
+      const res = await fetchCached(url, 'image/png', group);
       return res ? decodeElevation(await res.blob()) : flat;
     },
     flat,
@@ -279,15 +298,16 @@ function decodeVector(buf: ArrayBuffer): VectorData {
 const vectors = new Map<string, Promise<VectorData>>();
 
 /** Water, borders and names for a tile, in tile pixels. Never rejects. */
-export function loadVector(z: number, x: number, y: number): Promise<VectorData> {
+export function loadVector(z: number, x: number, y: number, group?: Group): Promise<VectorData> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(emptyVector);
   const url = vectorUrl(z, t.x, t.y);
+  if (group) wanted[group].add(url);
   return memoize(
     vectors,
     url,
     async () => {
-      const res = await fetchCached(url, 'application/x-protobuf');
+      const res = await fetchCached(url, 'application/x-protobuf', group);
       return res ? decodeVector(await res.arrayBuffer()) : emptyVector;
     },
     emptyVector,
