@@ -59,6 +59,8 @@ export interface NameRequest {
   z: number;
   x: number;
   y: number;
+  /** Only answer if the point is at sea (the ocean's name); null on land. */
+  oceanOnly?: boolean;
 }
 
 export interface NameResult {
@@ -182,7 +184,8 @@ async function oceanName(z: number, x: number, y: number): Promise<string | null
  * the highest summit nearby, else the most important nearby settlement, else
  * a water name. Null when the tiles have nothing (open ocean, empty land).
  */
-async function nameAt({ id, z, x, y }: NameRequest): Promise<NameResult> {
+async function nameAt({ id, z, x, y, oceanOnly }: NameRequest): Promise<NameResult> {
+  if (oceanOnly) return { type: 'named', id, name: await oceanName(z, x, y) };
   const { lat } = worldToLonLat(x, y, z);
   const mpp = (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** z);
   const r = NAME_RADIUS_M / mpp;

@@ -16,6 +16,11 @@
     <script>
       // A link to other coordinates must not flash this page's pre-rendered map.
       if (/[?&]lat=/.test(location.search)) document.documentElement.classList.add('elsewhere');
+      // The reader's text size, before first paint (see src/textsize.ts).
+      try {
+        var t = Number(localStorage.getItem('topography:text-scale'));
+        if ([1.1, 1.2, 1.3].indexOf(t) >= 0) document.documentElement.style.setProperty('--text-scale', t);
+      } catch (e) {}
     </script>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -34,16 +39,29 @@
     <div class="vignette" aria-hidden="true"></div>
     <div class="grain" aria-hidden="true"></div>
     <aside id="legend" class="legend"></aside>
-    <p class="credits">
-      Elevation <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> ·
-      <a href="https://openfreemap.org">OpenFreeMap</a> ·
-      <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> ·
-      <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>
-    </p>
-    <p class="coords"><span class="pulse" aria-hidden="true"></span><span id="coords"></span></p>
+    <aside class="locator" aria-label="Where you are">
+      <p id="region" class="region empty" aria-live="polite"></p>
+      <p class="coords"><span class="pulse" aria-hidden="true"></span><span id="coords"></span></p>
+      <div class="minimap" aria-hidden="true">
+        <canvas></canvas>
+        <span class="you"></span>
+      </div>
+      <p class="credits">
+        Elevation <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> ·
+        <a href="https://openfreemap.org">OpenFreeMap</a> ·
+        <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> ·
+        <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>
+      </p>
+    </aside>
     <nav class="nav" aria-label="Site">
       <a class="brand" href="/" aria-current="page">Topography</a>
       <a href="/mountains/">Summits</a>
+      <div class="textsize" role="radiogroup" aria-label="Text size" title="Text size">
+        <button type="button" role="radio" data-scale="1" aria-label="Default text size">a</button>
+        <button type="button" role="radio" data-scale="1.1" aria-label="Larger text">a</button>
+        <button type="button" role="radio" data-scale="1.2" aria-label="Large text">A</button>
+        <button type="button" role="radio" data-scale="1.3" aria-label="Largest text">A</button>
+      </div>
     </nav>
     <form id="search" class="search" role="search" onsubmit="return false">
       <svg class="glass" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></svg>

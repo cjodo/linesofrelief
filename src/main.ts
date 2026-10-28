@@ -7,7 +7,9 @@ import type {
   SceneResult,
 } from './contour.worker';
 import { Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
-import { buildFeatures, labelKey, type Features } from './features';
+import { buildFeatures, labelKey, setLabelScale, type Features } from './features';
+import { createMinimap } from './minimap';
+import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
@@ -129,6 +131,7 @@ function requestDraw() {
     }
     const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
     readout.textContent = formatLonLat(lat, lon);
+    minimap(cx, cy);
     discover();
   });
 }
@@ -294,6 +297,8 @@ function arrive(
   exportButton.disabled = true;
   range = null;
   lead.x = lead.y = 0;
+  regionAt = null;
+  scheduleRegion();
 
   document.body.classList.remove('loaded');
   canvas.classList.remove('ready');
@@ -413,9 +418,54 @@ function applyName(name: string, ele?: number) {
   syncUrl();
 }
 
+// --- Where am I: country / state / ocean under the centre --------------------
+
+const regionEl = document.querySelector<HTMLElement>('#region')!;
+/** Look the region up again only after moving this far. */
+const REGION_STEP_M = 2_000;
+let regionId = -1;
+let regionAt: { x: number; y: number } | null = null;
+let regionTimer = 0;
+
+/** After panning settles: at sea, the ocean; on land, state and country. */
+function scheduleRegion() {
+  clearTimeout(regionTimer);
+  regionTimer = window.setTimeout(() => {
+    const { lat } = worldToLonLat(cx, cy, ZOOM);
+    const mpp = (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** ZOOM);
+    if (regionAt && Math.hypot(cx - regionAt.x, cy - regionAt.y) * mpp < REGION_STEP_M) return;
+    regionAt = { x: cx, y: cy };
+    const req: NameRequest = { type: 'name', id: ++nextId, z: ZOOM, x: cx, y: cy, oceanOnly: true };
+    regionId = req.id;
+    worker.postMessage(req);
+  }, 400);
+}
+
+async function regionNamed({ id, name }: NameResult) {
+  if (name) return showRegion(name);
+  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  let text = '';
+  try {
+    const res = await fetch(`/api/reverse?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`);
+    const p = ((await res.json()) as { features: { properties: Record<string, string> }[] })
+      .features[0]?.properties;
+    const state = usable(p?.state);
+    const country = usable(p?.country);
+    text = [state, country !== state ? country : undefined].filter(Boolean).join(', ');
+  } catch {
+    // offline or no server: just the coordinates
+  }
+  if (id === regionId) showRegion(text);
+}
+
+function showRegion(text: string) {
+  regionEl.textContent = text;
+  regionEl.classList.toggle('empty', !text);
+}
+
 worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResult>) => {
   const msg = e.data;
-  if (msg.type === 'named') return named(msg);
+  if (msg.type === 'named') return msg.id === regionId ? regionNamed(msg) : named(msg);
   if (msg.id === previewId) {
     if (msg.type === 'scene' && !scene) {
       preview = buildScene(msg, emptyFeatures, 1, PREVIEW_SCALE);
@@ -435,6 +485,7 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   document.body.classList.remove('busy');
   const keep = new Set(scene?.features.labels.map((p) => labelKey(p.label)));
   const features = buildFeatures(ctx, msg.tiles, msg.labels, msg.width, msg.height, keep);
+  lastScene = msg;
   // One colour scale per arrival; re-fit only on reaching wholly new terrain.
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
   scene = buildScene(msg, features, DS, 1, range ?? undefined);
@@ -457,6 +508,7 @@ const clampLead = (v: number) => Math.max(-LEAD_MAX, Math.min(LEAD_MAX, v));
 function move(dx: number, dy: number) {
   cx += dx;
   cy += dy;
+  scheduleRegion();
   lead.x = clampLead(lead.x * 0.7 + dx * LEAD_GAIN);
   lead.y = clampLead(lead.y * 0.7 + dy * LEAD_GAIN);
   requestDraw();
@@ -510,6 +562,20 @@ createShare(document.querySelector<HTMLButtonElement>('#share')!, () => {
   history.replaceState(null, '', link.url);
   return { url: location.href, title: link.title };
 });
+const minimap = createMinimap(document.querySelector<HTMLElement>('.minimap')!);
+
+/** The last detailed scene's raw data, so labels can be re-laid out (text size). */
+let lastScene: SceneResult | null = null;
+setLabelScale(storedScale());
+createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
+  setLabelScale(scale);
+  if (!scene || !lastScene) return;
+  const m = lastScene;
+  const keep = new Set(scene.features.labels.map((p) => labelKey(p.label)));
+  scene = { ...scene, features: buildFeatures(ctx, m.tiles, m.labels, m.width, m.height, keep) };
+  requestDraw();
+});
+
 const exportButton = document.querySelector<HTMLButtonElement>('#export')!;
 createExport(exportButton, () => {
   if (!scene) return null;

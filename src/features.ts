@@ -86,6 +86,12 @@ function overlaps(a: PlacedLabel['box'], b: PlacedLabel['box'], gap: number) {
  */
 export const labelKey = (l: Label) => `${l.kind}:${l.name}`;
 
+/** Map labels follow the reader's text size (see textsize.ts). */
+let labelScale = 1;
+export function setLabelScale(scale: number) {
+  labelScale = scale;
+}
+
 /**
  * Labels already on screen (`keep`) are placed first so a new region doesn't
  * shuffle them.
@@ -109,20 +115,28 @@ function placeLabels(
     const text = s.upper ? label.name.toUpperCase() : label.name;
     setStyle(ctx, s.font, s.spacing);
     let width = ctx.measureText(text).width;
-    let box: PlacedLabel['box'];
+    // Extent around the anchor at text size 1, then scaled with the text.
+    let local: [number, number, number, number];
     if (label.kind === 'peak') {
       setStyle(ctx, ELE_FONT, 1.5);
       width = Math.max(width, ctx.measureText(`${fmt.format(label.ele!)} m`).width);
-      box = [label.x - width / 2, label.y - 6, label.x + width / 2, label.y + 34];
+      local = [-width / 2, -6, width / 2, 34];
     } else {
       const size = parseFloat(s.font.split(' ').find((p) => p.endsWith('px'))!);
       const dot = DOT[label.kind];
-      box = dot
-        ? [label.x - width / 2, label.y - dot - DOT_GAP - size - 2, label.x + width / 2, label.y + dot + 1]
-        : [label.x - width / 2, label.y - size / 2 - 2, label.x + width / 2, label.y + size / 2 + 2];
+      local = dot
+        ? [-width / 2, -dot - DOT_GAP - size - 2, width / 2, dot + 1]
+        : [-width / 2, -size / 2 - 2, width / 2, size / 2 + 2];
     }
-    const gap = s.gap;
-    if (placed.some((p) => overlaps(p.box, box, Math.max(gap, STYLE[p.label.kind].gap)))) continue;
+    const k = labelScale;
+    const box: PlacedLabel['box'] = [
+      label.x + local[0] * k,
+      label.y + local[1] * k,
+      label.x + local[2] * k,
+      label.y + local[3] * k,
+    ];
+    const gap = s.gap * k;
+    if (placed.some((p) => overlaps(p.box, box, Math.max(gap, STYLE[p.label.kind].gap * k)))) continue;
     placed.push({ label, text, box });
   }
   ctx.restore();
@@ -248,37 +262,39 @@ export function drawLabels(ctx: CanvasRenderingContext2D, f: Features, v: View) 
   for (const { label, text, box } of f.labels) {
     if (box[2] < v.x || box[0] > v.x + v.w || box[3] < v.y || box[1] > v.y + v.h) continue;
     const s = STYLE[label.kind];
+    // Each label is drawn around its anchor at text size 1, then scaled.
+    ctx.save();
+    ctx.translate(label.x, label.y);
+    ctx.scale(labelScale, labelScale);
     ctx.globalAlpha = 0.92;
     ctx.fillStyle = s.color;
     setStyle(ctx, s.font, s.spacing);
     const dot = DOT[label.kind];
     if (dot) {
       ctx.beginPath();
-      ctx.arc(label.x, label.y, dot, 0, Math.PI * 2);
+      ctx.arc(0, 0, dot, 0, Math.PI * 2);
       ctx.lineWidth = 2.5;
       ctx.stroke();
       ctx.fill();
       ctx.lineWidth = 3.5;
       ctx.textBaseline = 'alphabetic';
-      haloText(ctx, text, label.x, label.y - dot - DOT_GAP);
-      ctx.textBaseline = 'middle';
-      continue;
+      haloText(ctx, text, 0, -dot - DOT_GAP);
+    } else if (label.kind !== 'peak') {
+      haloText(ctx, text, 0, 0);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(0, -4);
+      ctx.lineTo(4, 3);
+      ctx.lineTo(-4, 3);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
+      haloText(ctx, text, 0, 16);
+      setStyle(ctx, ELE_FONT, 1.5);
+      ctx.fillStyle = INK.subtle;
+      haloText(ctx, `${fmt.format(label.ele!)} m`, 0, 29);
     }
-    if (label.kind !== 'peak') {
-      haloText(ctx, text, label.x, label.y);
-      continue;
-    }
-    ctx.beginPath();
-    ctx.moveTo(label.x, label.y - 4);
-    ctx.lineTo(label.x + 4, label.y + 3);
-    ctx.lineTo(label.x - 4, label.y + 3);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.fill();
-    haloText(ctx, text, label.x, label.y + 16);
-    setStyle(ctx, ELE_FONT, 1.5);
-    ctx.fillStyle = INK.subtle;
-    haloText(ctx, `${fmt.format(label.ele!)} m`, label.x, label.y + 29);
+    ctx.restore();
   }
   ctx.restore();
 }

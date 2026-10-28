@@ -282,6 +282,12 @@ ${headTags(page, site, version)}
     ${favicon}
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="${stylesheet}" />
+    <script>
+      try {
+        var t = Number(localStorage.getItem('topography:text-scale'));
+        if ([1.1, 1.2, 1.3].indexOf(t) >= 0) document.documentElement.style.setProperty('--text-scale', t);
+      } catch (e) {}
+    </script>
     <style>
       html, body { height: auto; overflow: auto; }
       body { padding: max(24px, 6vw) max(16px, 6vw) 96px; }

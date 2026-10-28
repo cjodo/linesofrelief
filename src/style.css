@@ -54,6 +54,11 @@
   margin: 0;
 }
 
+/* Every rem-based size follows the reader's choice (src/textsize.ts). */
+html {
+  font-size: calc(100% * var(--text-scale, 1));
+}
+
 html,
 body {
   height: 100%;
@@ -101,7 +106,7 @@ body {
   position: fixed;
   left: max(16px, 2.5vw);
   bottom: max(16px, 2.5vw);
-  width: 196px;
+  width: 12.25rem;
   padding: 20px 22px 18px;
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   border: 1px solid var(--overlay);
@@ -149,7 +154,7 @@ body {
   position: relative;
   display: flex;
   gap: 14px;
-  height: 140px;
+  height: 8.75rem;
   margin: 20px 0 20px;
 }
 .bar {
@@ -423,16 +428,19 @@ body:has(.search.searching) .loading-bar {
   align-items: center;
   gap: 28px;
   height: 40px;
+  /* A dense halo instead of a background: contour lines can't show through. */
   text-shadow:
-    0 0 14px var(--base),
-    0 0 4px var(--base);
+    0 0 2px var(--base),
+    0 0 4px var(--base),
+    0 0 8px var(--base),
+    0 0 16px var(--base);
 }
 .nav a {
   position: relative;
-  font: 400 0.66rem/1 var(--mono);
-  letter-spacing: 0.24em;
+  font: 400 0.72rem/1 var(--mono);
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--subtle);
+  color: var(--text);
   text-decoration: none;
   transition: color 0.2s;
 }
@@ -581,7 +589,7 @@ body:has(.search.searching) .loading-bar {
   transition: border-color 0.2s;
 }
 .search input::placeholder {
-  color: var(--muted);
+  color: var(--subtle);
 }
 .search input::-webkit-search-cancel-button {
   display: none;
@@ -597,7 +605,7 @@ body:has(.search.searching) .loading-bar {
   border: 1px solid var(--overlay);
   border-radius: 2px;
   font: 400 0.62rem/1.2 var(--mono);
-  color: var(--muted);
+  color: var(--subtle);
   pointer-events: none;
 }
 .search input:focus ~ kbd {
@@ -648,39 +656,39 @@ body:has(.search.searching) .loading-bar {
   color: var(--subtle);
 }
 
-.credits {
-  position: fixed;
-  right: max(16px, 2.5vw);
-  bottom: calc(max(16px, 2.5vw) + 18px);
-  font: 400 0.56rem/1 var(--mono);
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  opacity: 0.7;
-}
-.credits a {
-  color: inherit;
-  text-decoration: none;
-}
-.credits a:hover {
-  color: var(--subtle);
-}
+/* --- Locator: where am I (region, coordinates, world minimap, credits) -- */
 
-
-/* --- Coordinates -------------------------------------------------------- */
-
-.coords {
-  transition: opacity 1s ease 0.6s;
+.locator {
   position: fixed;
   right: max(16px, 2.5vw);
   bottom: max(16px, 2.5vw);
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  width: 15rem;
+  text-align: right;
+  pointer-events: none;
+  text-shadow:
+    0 0 14px var(--base),
+    0 0 4px var(--base);
+  transition: opacity 1s ease 0.6s;
+}
+.region {
+  font: italic 400 1.15rem/1.15 var(--serif);
+  color: var(--text);
+  transition: opacity 0.4s ease;
+}
+.region.empty {
+  opacity: 0;
+}
+.coords {
   display: flex;
   align-items: center;
   gap: 10px;
-  font: 400 0.68rem/1 var(--mono);
+  font: 400 0.66rem/1 var(--mono);
   letter-spacing: 0.12em;
-  color: var(--muted);
+  color: var(--subtle);
   white-space: pre;
-  pointer-events: none;
 }
 .pulse {
   width: 5px;
@@ -698,6 +706,147 @@ body:has(.search.searching) .loading-bar {
   50% {
     opacity: 0.25;
   }
+}
+
+.minimap {
+  position: relative;
+  width: 100%;
+  margin-top: 4px;
+  border: 1px solid var(--overlay);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--base) 85%, transparent);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+.minimap.ready {
+  opacity: 1;
+}
+.minimap canvas {
+  display: block;
+  width: 100%;
+}
+/* You are here: hairlines across the world, and a ring that breathes. */
+.minimap .you {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.minimap .you::before,
+.minimap .you::after {
+  content: '';
+  position: absolute;
+  background: #f6c177;
+  opacity: 0.35;
+}
+.minimap .you::before {
+  left: 0;
+  right: 0;
+  top: var(--y, -10px);
+  height: 1px;
+}
+.minimap .you::after {
+  top: 0;
+  bottom: 0;
+  left: var(--x, -10px);
+  width: 1px;
+}
+.minimap {
+  --ring: 9px;
+}
+.minimap .you {
+  background: radial-gradient(
+    circle at var(--x, -20px) var(--y, -20px),
+    #f6c177 0 1.5px,
+    transparent 2px var(--ring),
+    color-mix(in srgb, #ebbcba 70%, transparent) calc(var(--ring) + 0.5px),
+    transparent calc(var(--ring) + 1.5px)
+  );
+  animation: breathe-ring 2.4s ease-in-out infinite;
+}
+@property --ring {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 9px;
+}
+@keyframes breathe-ring {
+  50% {
+    --ring: 6px;
+  }
+}
+
+.credits {
+  font: 400 0.56rem/1.5 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  opacity: 0.8;
+  pointer-events: auto;
+}
+.credits a {
+  color: inherit;
+  text-decoration: none;
+}
+.credits a:hover {
+  color: var(--subtle);
+}
+
+/* --- Text size: a segmented control, the one bit of chrome in the nav ----- */
+
+.textsize {
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  margin-left: 6px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(10px);
+  text-shadow: none;
+}
+.textsize button {
+  all: unset;
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-family: var(--serif);
+  font-style: italic;
+  line-height: 1;
+  color: var(--subtle);
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background 0.2s;
+}
+/* Fixed sizes: the control shouldn't grow with the text it sets. */
+.textsize button:nth-child(1) {
+  font-size: 14px;
+}
+.textsize button:nth-child(2) {
+  font-size: 16px;
+}
+.textsize button:nth-child(3) {
+  font-size: 18px;
+}
+.textsize button:nth-child(4) {
+  font-size: 20px;
+}
+.textsize button:not([aria-checked='true']) {
+  color: color-mix(in srgb, var(--text) 80%, var(--subtle));
+}
+.textsize button:hover {
+  color: var(--rose);
+}
+.textsize button:focus-visible {
+  outline: 1px solid var(--iris);
+  outline-offset: -1px;
+}
+.textsize button[aria-checked='true'] {
+  background: var(--overlay);
+  color: var(--text);
+  box-shadow: inset 0 -1px 0 #f6c177;
 }
 
 /* --- Pre-rendered first frame -------------------------------------------
@@ -817,7 +966,7 @@ body:has(.search.searching) .loading-bar {
 
 /* Nothing else competes with the title until the map is in. */
 body:not(.loaded) .legend,
-body:not(.loaded) .coords {
+body:not(.loaded) .locator {
   opacity: 0;
 }
 
@@ -941,18 +1090,24 @@ body:not(.loaded) .coords {
   .intro {
     top: 120px;
   }
+  .locator {
+    right: 16px;
+    bottom: 16px;
+    width: 9.5rem;
+    gap: 6px;
+  }
+  .region {
+    font-size: 0.95rem;
+  }
   .coords {
-    display: none;
+    font-size: 0.56rem;
+    letter-spacing: 0.06em;
   }
   .credits {
-    left: auto;
-    right: 16px;
-    bottom: 18px;
-    max-width: calc(100vw - 230px);
-    line-height: 1.6;
-    text-align: right;
+    font-size: 0.5rem;
   }
-  body:not(.loaded) .credits {
+  /* The open legend sheet spans the width; the locator steps aside. */
+  body:has(.legend.open) .locator {
     opacity: 0;
   }
 }
