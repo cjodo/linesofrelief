@@ -18,7 +18,10 @@ import {
 import { PEAKS, type Peak } from './site/peaks';
 
 /** Public origin of the site; override with SITE_URL=https://… at build time. */
-const SITE_URL = (process.env.SITE_URL ?? 'https://isoline.app').replace(/\/+$/, '');
+// `||`, not `??`: the Dockerfile passes an empty SITE_URL when none is given,
+// which would make canonical, share-image and sitemap URLs relative (and the
+// sitemap invalid).
+const SITE_URL = (process.env.SITE_URL || 'https://linesofrelief.ink').replace(/\/+$/, '');
 
 const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?)?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
