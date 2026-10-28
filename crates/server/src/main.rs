@@ -26,7 +26,14 @@ const TERRAIN: &str = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
 const VECTOR_TILEJSON: &str = "https://tiles.openfreemap.org/planet";
 const PHOTON: &str = "https://photon.komoot.io/api/";
 const PHOTON_REVERSE: &str = "https://photon.komoot.io/reverse";
-const SEARCH_TAGS: [&str; 4] = ["natural:peak", "natural:volcano", "natural:mountain_range", "place:country"];
+const SEARCH_TAGS: [&str; 6] = [
+    "natural:peak",
+    "natural:volcano",
+    "natural:mountain_range",
+    "place:country",
+    "place:city",
+    "place:town",
+];
 
 const DAY: u64 = 86_400;
 /// Redis is a cache: never let a missing or slow one hold up startup or a request.
@@ -201,12 +208,14 @@ async fn search(State(app): State<Shared>, Query(SearchQuery { q }): Query<Searc
     if q.chars().count() < 2 || q.len() > 100 {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let key = format!("search:{q}");
+    // v2: cities and towns joined the results; older cached answers lack them.
+    let key = format!("search:v2:{q}");
     cached(&app, &key, &SEARCH_POLICY, || async move {
         let mut url = reqwest::Url::parse(PHOTON)?;
         {
             let mut params = url.query_pairs_mut();
-            params.append_pair("q", &q).append_pair("limit", "7").append_pair("lang", "en");
+            // More than the 7 shown: the browser re-ranks across kinds, then trims.
+            params.append_pair("q", &q).append_pair("limit", "10").append_pair("lang", "en");
             for tag in SEARCH_TAGS {
                 params.append_pair("osm_tag", tag);
             }

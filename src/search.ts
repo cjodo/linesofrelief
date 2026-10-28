@@ -23,7 +23,15 @@ interface PhotonFeature {
  * Kilimanjaro. Nudge the landmarks up: countries, volcanoes and ranges over
  * generic peaks, and peaks that sit in a region of the searched name.
  */
-const KIND_WEIGHT: Record<string, number> = { country: 2, volcano: 1, 'mountain range': 1 };
+const KIND_WEIGHT: Record<string, number> = {
+  country: 2,
+  city: 1.5,
+  volcano: 1,
+  'mountain range': 1,
+  town: 0.5,
+};
+/** Results shown (the server asks for a few more, to rank across kinds). */
+const SHOWN = 7;
 const CONTEXT_WEIGHT = 1.5;
 const ORDER_WEIGHT = 0.1;
 
@@ -67,7 +75,7 @@ async function query(q: string, signal: AbortSignal): Promise<Place[]> {
     const [lon, lat] = geometry.coordinates;
     places.push({ name: p.name, lat, lon, kind, context });
   }
-  const ranked = rank(places, q);
+  const ranked = rank(places, q).slice(0, SHOWN);
   cache.set(key, ranked);
   return ranked;
 }
