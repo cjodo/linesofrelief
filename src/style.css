@@ -559,7 +559,7 @@ body:has(.search.searching) .loading-bar {
   top: max(16px, 2.5vw);
   right: calc(max(16px, 2.5vw) + 96px);
   z-index: 5;
-  width: min(320px, calc(100vw - 128px));
+  width: min(360px, calc(100vw - 128px));
 }
 .search .glass {
   position: absolute;

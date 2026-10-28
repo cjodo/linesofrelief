@@ -28,7 +28,9 @@ const KIND_WEIGHT: Record<string, number> = {
   city: 1.5,
   volcano: 1,
   'mountain range': 1,
+  lake: 1,
   town: 0.5,
+  reservoir: 0.5,
 };
 /** Results shown (the server asks for a few more, to rank across kinds). */
 const SHOWN = 7;

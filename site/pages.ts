@@ -66,7 +66,7 @@ export function rootPage(
   hasPrerender = false,
 ): Page {
   const description =
-    'An artistic, dark topographic map. Search any summit, town or country and watch its terrain drawn as contour lines, with rivers, lakes, borders and peaks. Free, no sign-up.';
+    'An artistic, dark topographic map. Search any peak, lake, town or country and watch its terrain drawn as contour lines, with rivers, lakes, borders and peaks. Free, no sign-up.';
   return {
     path: '/',
     title: `${SITE_NAME} · Contour maps of any mountain on Earth`,

@@ -26,13 +26,16 @@ const TERRAIN: &str = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
 const VECTOR_TILEJSON: &str = "https://tiles.openfreemap.org/planet";
 const PHOTON: &str = "https://photon.komoot.io/api/";
 const PHOTON_REVERSE: &str = "https://photon.komoot.io/reverse";
-const SEARCH_TAGS: [&str; 6] = [
+const SEARCH_TAGS: [&str; 8] = [
     "natural:peak",
     "natural:volcano",
     "natural:mountain_range",
     "place:country",
     "place:city",
     "place:town",
+    // Lakes and reservoirs only: natural:water would add every named pond.
+    "water:lake",
+    "water:reservoir",
 ];
 
 const DAY: u64 = 86_400;
@@ -208,8 +211,8 @@ async fn search(State(app): State<Shared>, Query(SearchQuery { q }): Query<Searc
     if q.chars().count() < 2 || q.len() > 100 {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    // v2: cities and towns joined the results; older cached answers lack them.
-    let key = format!("search:v2:{q}");
+    // Bumped whenever SEARCH_TAGS changes, so older cached answers aren't reused.
+    let key = format!("search:v3:{q}");
     cached(&app, &key, &SEARCH_POLICY, || async move {
         let mut url = reqwest::Url::parse(PHOTON)?;
         {
