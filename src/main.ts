@@ -1,4 +1,4 @@
-import { DS, MONO, SERIF, START, TILE, ZOOM } from './config';
+import { DEFAULT_ZOOM, DS, INTERVALS, MONO, SERIF, START, TILE, ZOOMS } from './config';
 import type {
   NameRequest,
   NameResult,
@@ -6,7 +6,7 @@ import type {
   SceneRequest,
   SceneResult,
 } from './contour.worker';
-import { Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
+import { ATLAS_ZOOM, Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
 import { buildFeatures, labelKey, setLabelScale, type Features } from './features';
 import { createMinimap } from './minimap';
 import { createTextSize, storedScale } from './textsize';
@@ -20,11 +20,13 @@ import { pageSpot, readSpot, spotUrl, type Spot } from './url';
 import { lonLatToWorld, worldToLonLat } from './tiles';
 
 /** World pixels drawn beyond the viewport on every side. */
-const MARGIN = 384;
+const MARGIN = 256;
 /** Request the next region while this much drawn map is still left ahead. */
-const TRIGGER = 256;
+const TRIGGER = 192;
 /** Extra reach in the direction of travel, at full speed. */
-const LEAD_MAX = 384;
+const LEAD_MAX = 256;
+/** At or below this zoom, map tiles come one zoom coarser (a quarter of the requests). */
+const COARSE_VECTORS_BELOW = 12;
 /** How strongly recent pan speed turns into lead (per move event). */
 const LEAD_GAIN = 6;
 /**
@@ -75,6 +77,8 @@ function retirePrerender() {
 
 const worker = new Worker(new URL('./contour.worker.ts', import.meta.url), { type: 'module' });
 
+/** The view's web-mercator zoom; cx/cy are world pixels at this zoom. */
+let zoom = DEFAULT_ZOOM;
 let cx = 0;
 let cy = 0;
 let w = 0;
@@ -118,20 +122,21 @@ function requestDraw() {
     // Without a scene the last frame stays put, so a departure can fade out.
     if (scene) {
       ctx.clearRect(0, 0, w, h);
-      draw(ctx, scene, x0, y0, w, h);
+      draw(ctx, scene, x0, y0, w, h, zoom);
     }
     if (preview) {
       pctx.clearRect(0, 0, w, h);
-      draw(pctx, preview, x0, y0, w, h);
+      draw(pctx, preview, x0, y0, w, h, zoom);
     }
     if (prerenderLive) {
       // Early pans move the picture with the map until the live canvas is in.
       prerenderImg!.style.setProperty('--dx', `${arrival.x - cx}px`);
       prerenderImg!.style.setProperty('--dy', `${arrival.y - cy}px`);
     }
-    const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+    const { lat, lon } = worldToLonLat(cx, cy, zoom);
     readout.textContent = formatLonLat(lat, lon);
-    minimap(cx, cy);
+    minimap(cx, cy, zoom);
+    showScale(lat);
     discover();
   });
 }
@@ -142,21 +147,36 @@ const atlas = new Atlas();
 const showCard = createCard(document.querySelector<HTMLElement>('#discovery')!);
 const fmt = new Intl.NumberFormat('en-US');
 
+/** The important summit within `radius` screen pixels of the centre (the atlas keeps ATLAS_ZOOM pixels). */
+function atlasNear(radius: number) {
+  const f = 2 ** (ATLAS_ZOOM - zoom);
+  return atlas.near(cx * f, cy * f, radius * f, zoom);
+}
+
 /** A search (or Back) arrival announces itself with the card once the map is in. */
 let pendingCard: { key: string; name: string; kind?: string; context?: string } | null = null;
 
-/** An important summit reaching the centre of the screen for the first time. */
+/** Cards never stack: after one plays, others wait (and fire later if still due). */
+const CARD_COOLDOWN_MS = 7_000;
+let cardsResumeAt = 0;
+function playCard(card: Parameters<typeof showCard>[0]) {
+  cardsResumeAt = performance.now() + CARD_COOLDOWN_MS;
+  showCard(card);
+}
+const cardsPaused = () => performance.now() < cardsResumeAt;
+
+/** A summit important at this zoom reaching the centre of the screen, first time. */
 function discover() {
-  if (!document.body.classList.contains('loaded')) return;
-  const mark = atlas.near(cx, cy, CENTRE_PX);
+  if (!document.body.classList.contains('loaded') || cardsPaused()) return;
+  const mark = atlasNear(CENTRE_PX);
   if (!mark || discovered.has(mark.key)) return;
   markDiscovered(mark.key);
-  showCard({ eyebrow: 'New area discovered', name: mark.name, detail: mark.detail });
+  playCard({ eyebrow: 'New area discovered', name: mark.name, detail: mark.detail });
 }
 
 /** Called as the detailed map lands: play or silence the arrival's discovery. */
 function settleArrival() {
-  const mark = atlas.near(cx, cy, CENTRE_PX);
+  const mark = atlasNear(CENTRE_PX);
   const card = pendingCard;
   pendingCard = null;
   if (card) {
@@ -169,7 +189,7 @@ function settleArrival() {
         : [mark?.ele !== undefined ? `${fmt.format(mark.ele)} m` : '', card.context]
             .filter(Boolean)
             .join(' · ');
-    showCard({
+    playCard({
       eyebrow: seen ? 'Returning to' : region ? 'New region discovered' : 'New area discovered',
       name: card.name,
       detail,
@@ -193,6 +213,9 @@ function request(z: number, k: number, ds: number, features: boolean): SceneRequ
     z,
     ds,
     features,
+    // The view's interval, also for the coarse preview, so line weights match.
+    interval: INTERVALS[zoom],
+    coarseVectors: features && z < COARSE_VECTORS_BELOW,
     tx0: Math.floor(x0 / TILE),
     tx1: Math.floor(x1 / TILE),
     ty0: Math.max(0, Math.floor(y0 / TILE)),
@@ -206,6 +229,7 @@ function ensure() {
   const y0 = cy - h / 2;
   if (
     scene &&
+    scene.zoom === zoom &&
     x0 >= scene.originX + TRIGGER &&
     y0 >= scene.originY + TRIGGER &&
     x0 + w <= scene.originX + scene.width - TRIGGER &&
@@ -215,7 +239,7 @@ function ensure() {
   }
   if (detailId !== -1) return; // re-checked when the in-flight scene lands
   document.body.classList.add('busy');
-  const req = request(ZOOM, 1, DS, true);
+  const req = request(zoom, 1, DS, true);
   detailId = req.id;
   worker.postMessage(req);
 }
@@ -255,11 +279,13 @@ let arrival: { x: number; y: number; name?: string; home: boolean } = { x: 0, y:
 
 /** The view as a shareable URL and title. */
 function currentLink() {
-  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  const { lat, lon } = worldToLonLat(cx, cy, zoom);
   const near = Math.hypot(cx - arrival.x, cy - arrival.y) < Math.max(w, h) / 2;
-  if (near && arrival.home) return { url: location.pathname, title: PAGE_TITLE };
+  if (near && arrival.home && zoom === DEFAULT_ZOOM) {
+    return { url: location.pathname, title: PAGE_TITLE };
+  }
   const name = near ? arrival.name : undefined;
-  return { url: spotUrl({ name, lat, lon }), title: titleFor(name) };
+  return { url: spotUrl({ name, lat, lon, zoom }), title: titleFor(name) };
 }
 
 let syncTimer = 0;
@@ -281,15 +307,18 @@ function syncUrl() {
  */
 function arrive(
   place: Spot & { kind?: string; context?: string },
-  { push = false, announce = false } = {},
+  { push = false, announce = false, keepZoom = false } = {},
 ) {
-  ({ x: cx, y: cy } = lonLatToWorld(place.lon, place.lat, ZOOM));
+  // A link's zoom wins; a search keeps the reader's; otherwise the default.
+  zoom = place.zoom ?? (keepZoom ? zoom : DEFAULT_ZOOM);
+  updateZoomControls();
+  ({ x: cx, y: cy } = lonLatToWorld(place.lon, place.lat, zoom));
   const home = place === pageSpot;
   // e.g. a search hit named only in another script: name the view ourselves.
   if (place.name && !settable(place.name)) place = { ...place, name: undefined };
   arrival = { x: cx, y: cy, name: place.name, home };
   clearTimeout(syncTimer);
-  if (push) history.pushState(null, '', spotUrl(place));
+  if (push) history.pushState(null, '', spotUrl({ ...place, zoom }));
   document.title = home ? PAGE_TITLE : titleFor(place.name);
   scene = null;
   preview = null;
@@ -298,6 +327,7 @@ function arrive(
   range = null;
   lead.x = lead.y = 0;
   regionAt = null;
+  regionQuiet = true;
   scheduleRegion();
 
   document.body.classList.remove('loaded');
@@ -335,7 +365,7 @@ function arrive(
 
 /** Queue the coarse preview ahead of the detailed request so it paints first. */
 function requestPreview() {
-  const first = request(ZOOM - PREVIEW_DROP, PREVIEW_SCALE, 1, false);
+  const first = request(zoom - PREVIEW_DROP, PREVIEW_SCALE, 1, false);
   previewId = first.id;
   worker.postMessage(first);
 }
@@ -363,11 +393,9 @@ let nameId = -1;
 
 /** Name the arrival: a known summit nearby, else the map tiles, else the server. */
 function nameView() {
-  const { lat } = worldToLonLat(cx, cy, ZOOM);
-  const mpp = (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** ZOOM);
-  const known = atlas.near(cx, cy, KNOWN_NAME_M / mpp);
+  const known = atlasNear(KNOWN_NAME_M / metresPerPx());
   if (known) return applyName(known.name, known.ele);
-  const req: NameRequest = { type: 'name', id: ++nextId, z: ZOOM, x: cx, y: cy };
+  const req: NameRequest = { type: 'name', id: ++nextId, z: zoom, x: cx, y: cy };
   nameId = req.id;
   worker.postMessage(req);
 }
@@ -376,7 +404,7 @@ async function named({ id, name, ele }: NameResult) {
   if (id !== nameId) return; // a newer arrival took over
   if (name) return applyName(name, ele);
   // Nothing in the tiles (open sea, empty land): ask the server what's near.
-  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  const { lat, lon } = worldToLonLat(cx, cy, zoom);
   let fallback: string | undefined;
   try {
     const res = await fetch(`/api/reverse?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`);
@@ -426,24 +454,24 @@ const REGION_STEP_M = 2_000;
 let regionId = -1;
 let regionAt: { x: number; y: number } | null = null;
 let regionTimer = 0;
+/** The arrival's own region is announced by the intro or card, not again. */
+let regionQuiet = true;
 
 /** After panning settles: at sea, the ocean; on land, state and country. */
 function scheduleRegion() {
   clearTimeout(regionTimer);
   regionTimer = window.setTimeout(() => {
-    const { lat } = worldToLonLat(cx, cy, ZOOM);
-    const mpp = (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** ZOOM);
-    if (regionAt && Math.hypot(cx - regionAt.x, cy - regionAt.y) * mpp < REGION_STEP_M) return;
+    if (regionAt && Math.hypot(cx - regionAt.x, cy - regionAt.y) * metresPerPx() < REGION_STEP_M) return;
     regionAt = { x: cx, y: cy };
-    const req: NameRequest = { type: 'name', id: ++nextId, z: ZOOM, x: cx, y: cy, oceanOnly: true };
+    const req: NameRequest = { type: 'name', id: ++nextId, z: zoom, x: cx, y: cy, oceanOnly: true };
     regionId = req.id;
     worker.postMessage(req);
   }, 400);
 }
 
 async function regionNamed({ id, name }: NameResult) {
-  if (name) return showRegion(name);
-  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  if (name) return showRegion(name, { eyebrow: 'New waters discovered', name });
+  const { lat, lon } = worldToLonLat(cx, cy, zoom);
   let text = '';
   try {
     const res = await fetch(`/api/reverse?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`);
@@ -452,15 +480,34 @@ async function regionNamed({ id, name }: NameResult) {
     const state = usable(p?.state);
     const country = usable(p?.country);
     text = [state, country !== state ? country : undefined].filter(Boolean).join(', ');
+    if (id === regionId && text) {
+      const name = state ?? country!;
+      return showRegion(text, {
+        eyebrow: 'New region discovered',
+        name,
+        detail: state && country && country !== state ? country : undefined,
+      });
+    }
   } catch {
     // offline or no server: just the coordinates
   }
   if (id === regionId) showRegion(text);
 }
 
-function showRegion(text: string) {
+/** Show where we are; the first visit to a region plays its discovery card. */
+function showRegion(text: string, card?: { eyebrow: string; name: string; detail?: string }) {
   regionEl.textContent = text;
   regionEl.classList.toggle('empty', !text);
+  if (!card) return;
+  const key = `region:${text}`;
+  if (regionQuiet) {
+    regionQuiet = false;
+    markDiscovered(key);
+    return;
+  }
+  if (discovered.has(key) || cardsPaused() || !document.body.classList.contains('loaded')) return;
+  markDiscovered(key);
+  playCard(card);
 }
 
 worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResult>) => {
@@ -468,7 +515,7 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   if (msg.type === 'named') return msg.id === regionId ? regionNamed(msg) : named(msg);
   if (msg.id === previewId) {
     if (msg.type === 'scene' && !scene) {
-      preview = buildScene(msg, emptyFeatures, 1, PREVIEW_SCALE);
+      preview = buildScene(msg, emptyFeatures, 1);
       previewCanvas.classList.add('ready');
       requestDraw();
     }
@@ -488,18 +535,18 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   lastScene = msg;
   // One colour scale per arrival; re-fit only on reaching wholly new terrain.
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
-  scene = buildScene(msg, features, DS, 1, range ?? undefined);
+  scene = buildScene(msg, features, DS, range ?? undefined);
   range ??= { lo: scene.lo, hi: scene.hi };
   exportButton.disabled = false;
-  atlas.addPeaks(msg.labels, msg.originX, msg.originY);
-  updateLegend(scene.lo, scene.hi);
+  atlas.addPeaks(msg.labels, msg.originX, msg.originY, msg.z);
+  updateLegend(scene.lo, scene.hi, scene.minor, scene.major);
   if (!document.body.classList.contains('loaded')) settleArrival();
   reveal();
   requestDraw();
   ensure();
 };
 
-// --- Panning only. Scale is fixed. -----------------------------------------
+// --- Panning ----------------------------------------------------------------
 
 /** Recent direction and speed of travel, in world pixels (see request()). */
 const lead = { x: 0, y: 0 };
@@ -516,24 +563,123 @@ function move(dx: number, dy: number) {
   syncUrl();
 }
 
+/** Ground metres per screen pixel at the centre of the view. */
+function metresPerPx() {
+  const { lat } = worldToLonLat(cx, cy, zoom);
+  return (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** zoom);
+}
+
+// --- Stepped zoom ------------------------------------------------------------
+//
+// A handful of fixed scales (ZOOMS), never continuous. A step shows the scene
+// on screen scaled ×2 or ×½ at once (draw() scales any scene to the view's
+// zoom) while the crisp scene for the new level loads in behind it.
+
+const zoomIn = document.querySelector<HTMLButtonElement>('#zoom-in')!;
+const zoomOut = document.querySelector<HTMLButtonElement>('#zoom-out')!;
+
+function updateZoomControls() {
+  zoomIn.disabled = zoom >= ZOOMS[ZOOMS.length - 1];
+  zoomOut.disabled = zoom <= ZOOMS[0];
+}
+
+/** Step to `next`, keeping the world point under screen (ax, ay) in place. */
+function zoomTo(next: number, ax = w / 2, ay = h / 2) {
+  if (!ZOOMS.includes(next) || next === zoom) return;
+  const f = 2 ** (next - zoom);
+  cx = (cx - w / 2 + ax) * f - ax + w / 2;
+  cy = (cy - h / 2 + ay) * f - ay + h / 2;
+  arrival.x *= f;
+  arrival.y *= f;
+  zoom = next;
+  updateZoomControls();
+  // The old scene stays as the stand-in; the in-flight request is for the old
+  // zoom, so forget it and ask for this one.
+  detailId = -1;
+  range = null;
+  lead.x = lead.y = 0;
+  regionAt = null;
+  retirePrerender();
+  requestDraw();
+  ensure();
+  scheduleRegion();
+  syncUrl();
+}
+
+zoomIn.addEventListener('click', () => zoomTo(zoom + 1));
+zoomOut.addEventListener('click', () => zoomTo(zoom - 1));
+
+/** Scale bar: the largest 1/2/5 × 10ⁿ distance that fits in MAX_BAR px. */
+const scaleBar = document.querySelector<HTMLElement>('.scalebar')!;
+const scaleLabel = scaleBar.querySelector<HTMLElement>('span')!;
+const MAX_BAR = 72;
+let scaleShown = '';
+function showScale(lat: number) {
+  const mpp = (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** zoom);
+  const max = MAX_BAR * mpp;
+  const pow = 10 ** Math.floor(Math.log10(max));
+  const metres = [5, 2, 1].map((m) => m * pow).find((m) => m <= max)!;
+  const text = metres >= 1000 ? `${fmt.format(metres / 1000)} km` : `${fmt.format(metres)} m`;
+  const width = `${(metres / mpp).toFixed(1)}px`;
+  if (text + width === scaleShown) return;
+  scaleShown = text + width;
+  scaleLabel.textContent = text;
+  scaleBar.style.setProperty('--bar', width);
+}
+
+// --- Pointer input: drag pans, pinch steps zoom (once per gesture) -----------
+
+const pointers = new Map<number, { x: number; y: number }>();
 let drag: { x: number; y: number } | null = null;
+let pinch: { spread: number; stepped: boolean } | null = null;
+/** Spread change that counts as a pinch step (in or out). */
+const PINCH_IN = 1.4;
+const PINCH_OUT = 0.7;
+
+const spread = () => {
+  const [a, b] = [...pointers.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
 
 canvas.addEventListener('pointerdown', (e) => {
-  drag = { x: e.clientX, y: e.clientY };
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
-  canvas.classList.add('dragging');
+  if (pointers.size === 1) {
+    drag = { x: e.clientX, y: e.clientY };
+    canvas.classList.add('dragging');
+  } else if (pointers.size === 2) {
+    drag = null;
+    pinch = { spread: spread(), stepped: false };
+  }
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && pointers.size >= 2) {
+    const ratio = spread() / pinch.spread;
+    if (!pinch.stepped && (ratio > PINCH_IN || ratio < PINCH_OUT)) {
+      pinch.stepped = true;
+      const [a, b] = [...pointers.values()];
+      zoomTo(zoom + (ratio > 1 ? 1 : -1), (a.x + b.x) / 2, (a.y + b.y) / 2);
+    }
+    return;
+  }
   if (!drag) return;
   move(drag.x - e.clientX, drag.y - e.clientY);
   drag = { x: e.clientX, y: e.clientY };
 });
-const endDrag = () => {
-  drag = null;
-  canvas.classList.remove('dragging');
+const endPointer = (e: PointerEvent) => {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  // Lifting one finger of a pinch continues as a drag from where it is.
+  const rest = [...pointers.values()][0];
+  drag = rest ? { ...rest } : null;
+  if (!rest) canvas.classList.remove('dragging');
 };
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+
+// --- Keyboard: arrows pan, + / − step zoom -----------------------------------
 
 const STEP = 160;
 const KEYS: Record<string, [number, number]> = {
@@ -542,20 +688,53 @@ const KEYS: Record<string, [number, number]> = {
   ArrowUp: [0, -STEP],
   ArrowDown: [0, STEP],
 };
+const ZOOM_KEYS: Record<string, number> = { '+': 1, '=': 1, '-': -1, _: -1 };
 window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey) return;
+  const step = ZOOM_KEYS[e.key];
+  if (step) {
+    e.preventDefault();
+    zoomTo(zoom + step);
+    return;
+  }
   const d = KEYS[e.key];
-  if (!d || e.target instanceof HTMLInputElement) return;
+  if (!d) return;
   e.preventDefault();
   move(d[0], d[1]);
 });
 
-// No zoom, by design.
-window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+// --- Wheel / trackpad: one step per gesture, toward the cursor ---------------
+
+/** Accumulated scroll needed for a step (trackpad pinch deltas are small). */
+const WHEEL_STEP = 60;
+/** After a step, input is ignored until the gesture has been quiet this long. */
+const WHEEL_QUIET_MS = 220;
+let wheelSum = 0;
+let wheelLockedUntil = 0;
+window.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault(); // the page itself never scrolls or zooms
+    const now = performance.now();
+    if (now < wheelLockedUntil) {
+      wheelLockedUntil = now + WHEEL_QUIET_MS; // still the same gesture
+      return;
+    }
+    const lines = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+    wheelSum += e.deltaY * lines * (e.ctrlKey ? 6 : 1);
+    if (Math.abs(wheelSum) < WHEEL_STEP) return;
+    const dir = wheelSum < 0 ? 1 : -1;
+    wheelSum = 0;
+    wheelLockedUntil = now + WHEEL_QUIET_MS + 150;
+    zoomTo(zoom + dir, e.clientX, e.clientY);
+  },
+  { passive: false },
+);
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 window.addEventListener('resize', resize);
 createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) =>
-  arrive(place, { push: true, announce: true }),
+  arrive(place, { push: true, announce: true, keepZoom: true }),
 );
 createShare(document.querySelector<HTMLButtonElement>('#share')!, () => {
   const link = currentLink();
@@ -579,9 +758,9 @@ createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
 const exportButton = document.querySelector<HTMLButtonElement>('#export')!;
 createExport(exportButton, () => {
   if (!scene) return null;
-  const { lat, lon } = worldToLonLat(cx, cy, ZOOM);
+  const { lat, lon } = worldToLonLat(cx, cy, zoom);
   const near = Math.hypot(cx - arrival.x, cy - arrival.y) < Math.max(w, h) / 2;
-  return { scene, x: cx - w / 2, y: cy - h / 2, w, h, name: near ? arrival.name : undefined, lat, lon };
+  return { scene, x: cx - w / 2, y: cy - h / 2, w, h, zoom, name: near ? arrival.name : undefined, lat, lon };
 });
 
 const landing = () => readSpot() ?? pageSpot ?? START;

@@ -708,6 +708,66 @@ body:has(.search.searching) .loading-bar {
   }
 }
 
+/* Zoom: a scale bar and two steps, just above the minimap. */
+.zoombar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.scalebar {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  margin-right: 6px;
+  font: 400 0.6rem/1 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--subtle);
+}
+.scalebar::after {
+  content: '';
+  width: var(--bar, 40px);
+  height: 4px;
+  border: 1px solid var(--subtle);
+  border-top: 0;
+  transition: width 0.3s ease;
+}
+.zoom {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--overlay);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(10px);
+  color: var(--text);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    color 0.2s,
+    border-color 0.2s,
+    opacity 0.2s;
+}
+.zoom svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.zoom:hover:not(:disabled),
+.zoom:focus-visible {
+  color: var(--rose);
+  border-color: color-mix(in srgb, var(--rose) 45%, var(--overlay));
+  outline: none;
+}
+.zoom:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .minimap {
   position: relative;
   width: 100%;

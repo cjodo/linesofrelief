@@ -14,6 +14,8 @@ export interface View {
   y: number;
   w: number;
   h: number;
+  /** The view's zoom (the scene may be a stand-in from another one). */
+  zoom: number;
   name?: string;
   lat: number;
   lon: number;
@@ -61,7 +63,7 @@ function render(v: View): HTMLCanvasElement {
 
   g.fillStyle = INK.base;
   g.fillRect(0, 0, v.w, v.h);
-  draw(g, v.scene, v.x, v.y, v.w, v.h);
+  draw(g, v.scene, v.x, v.y, v.w, v.h, v.zoom);
 
   // The same soft vignette the page lays over the map.
   const r = Math.hypot(v.w, v.h) / 2;

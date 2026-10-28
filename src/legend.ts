@@ -1,4 +1,4 @@
-import { INK, MAJOR, MINOR } from './config';
+import { INK } from './config';
 import { DOT } from './features';
 import { ramp } from './render';
 
@@ -19,9 +19,9 @@ export function createLegend(root: HTMLElement) {
     </div>
     <dl class="key">
       <div><dt><svg viewBox="0 0 28 10"><line x1="0" y1="5" x2="28" y2="5" stroke="${INK.text}" stroke-width="1.6"/></svg></dt>
-        <dd>index <span>${MAJOR} m</span></dd></div>
+        <dd>index <span class="major"></span></dd></div>
       <div><dt><svg viewBox="0 0 28 10"><line x1="0" y1="5" x2="28" y2="5" stroke="${INK.text}" stroke-width="0.7" opacity="0.6"/></svg></dt>
-        <dd>intermediate <span>${MINOR} m</span></dd></div>
+        <dd>intermediate <span class="minor"></span></dd></div>
     </dl>
     <h3>Water</h3>
     <dl class="key">
@@ -77,12 +77,18 @@ export function createLegend(root: HTMLElement) {
     `linear-gradient(to right, ${gradient.join(', ')})`;
 
   let shown = '';
-  return function update(lo: number, hi: number) {
+  const majorEl = root.querySelector<HTMLElement>('.major')!;
+  const minorEl = root.querySelector<HTMLElement>('.minor')!;
+
+  /** Colour range and the contour intervals of the zoom level on screen. */
+  return function update(lo: number, hi: number, minor: number, major: number) {
+    majorEl.textContent = `${fmt.format(major)} m`;
+    minorEl.textContent = `${fmt.format(minor)} m`;
     const key = `${lo}:${hi}`;
     if (key === shown) return;
     shown = key;
     const span = hi - lo;
-    const step = [MAJOR, 500, 1000, 2000, 5000].find((s) => span / s <= 5) ?? 10000;
+    const step = [250, 500, 1000, 2000, 5000].find((s) => span / s <= 5) ?? 10000;
     const items: string[] = [];
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
       items.push(`<li style="bottom:${((v - lo) / span) * 100}%">${fmt.format(v)}</li>`);

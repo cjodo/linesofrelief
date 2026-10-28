@@ -13,6 +13,8 @@ export interface View {
 interface TilePaths {
   ox: number;
   oy: number;
+  /** Scene pixels per tile pixel (2 for a tile one zoom coarser). */
+  scale: number;
   ocean: Path2D | null;
   lake: Path2D | null;
   river: Path2D | null;
@@ -155,6 +157,7 @@ export function buildFeatures(
     tiles: tiles.map((t) => ({
       ox: t.ox,
       oy: t.oy,
+      scale: t.scale,
       ocean: pathOf(t.ocean),
       lake: pathOf(t.lake),
       river: pathOf(t.river),
@@ -193,12 +196,15 @@ function eachVisibleTile(
   fn: (t: TilePaths) => void,
 ) {
   for (const t of f.tiles) {
-    if (t.ox > v.x + v.w || t.oy > v.y + v.h || t.ox + TILE < v.x || t.oy + TILE < v.y) continue;
+    const size = TILE * t.scale;
+    if (t.ox > v.x + v.w || t.oy > v.y + v.h || t.ox + size < v.x || t.oy + size < v.y) continue;
     ctx.save();
     ctx.translate(t.ox, t.oy);
     ctx.beginPath();
-    ctx.rect(0, 0, TILE, TILE);
+    ctx.rect(0, 0, size, size);
     ctx.clip();
+    // Geometry is in tile pixels; widths below divide by t.scale to stay put.
+    ctx.scale(t.scale, t.scale);
     fn(t);
     ctx.restore();
   }
@@ -211,7 +217,9 @@ export function drawWater(ctx: CanvasRenderingContext2D, f: Features, v: View) {
       ctx.globalAlpha = 0.14;
       ctx.fill(t.ocean);
       ctx.globalAlpha = 1;
-      ctx.fillStyle = oceanHatch(ctx);
+      const hatch = oceanHatch(ctx);
+      hatch.setTransform(new DOMMatrix().scale(1 / t.scale));
+      ctx.fillStyle = hatch;
       ctx.fill(t.ocean);
     }
     if (t.lake) {
@@ -227,20 +235,21 @@ export function drawLines(ctx: CanvasRenderingContext2D, f: Features, v: View) {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.strokeStyle = INK.shore;
+    const px = (n: number) => n / t.scale; // screen pixels → tile pixels
     ctx.globalAlpha = 0.7;
-    ctx.lineWidth = 0.8;
+    ctx.lineWidth = px(0.8);
     if (t.ocean) ctx.stroke(t.ocean);
     if (t.lake) ctx.stroke(t.lake);
     if (t.river) {
       ctx.globalAlpha = 0.9;
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = px(1.4);
       ctx.stroke(t.river);
     }
     if (t.border) {
       ctx.strokeStyle = INK.border;
       ctx.globalAlpha = 0.85;
-      ctx.lineWidth = 1.1;
-      ctx.setLineDash([7, 4, 1.5, 4]);
+      ctx.lineWidth = px(1.1);
+      ctx.setLineDash([7, 4, 1.5, 4].map(px));
       ctx.stroke(t.border);
       ctx.setLineDash([]);
     }

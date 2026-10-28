@@ -14,8 +14,9 @@
       html { background: #191724; color: #e0def4; color-scheme: dark; }
     </style>
     <script>
-      // A link to other coordinates must not flash this page's pre-rendered map.
-      if (/[?&]lat=/.test(location.search)) document.documentElement.classList.add('elsewhere');
+      // A link to other coordinates or another zoom must not flash this page's
+      // pre-rendered map (drawn at the default zoom).
+      if (/[?&](lat|z)=/.test(location.search)) document.documentElement.classList.add('elsewhere');
       // The reader's text size, before first paint (see src/textsize.ts).
       try {
         var t = Number(localStorage.getItem('topography:text-scale'));
@@ -42,6 +43,15 @@
     <aside class="locator" aria-label="Where you are">
       <p id="region" class="region empty" aria-live="polite"></p>
       <p class="coords"><span class="pulse" aria-hidden="true"></span><span id="coords"></span></p>
+      <div class="zoombar">
+        <span class="scalebar" aria-hidden="true"><span></span></span>
+        <button id="zoom-out" class="zoom" type="button" aria-label="Zoom out" title="Zoom out (−)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" /></svg>
+        </button>
+        <button id="zoom-in" class="zoom" type="button" aria-label="Zoom in" title="Zoom in (+)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" /></svg>
+        </button>
+      </div>
       <div class="minimap" aria-hidden="true">
         <canvas></canvas>
         <span class="you"></span>

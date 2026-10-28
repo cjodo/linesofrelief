@@ -1,4 +1,4 @@
-import { TILE, ZOOM } from './config';
+import { DEFAULT_ZOOM, TILE } from './config';
 import { detailOf, PEAKS } from '../site/peaks';
 import type { Label } from './tiles';
 import { lonLatToWorld, worldToLonLat } from './tiles';
@@ -21,11 +21,19 @@ export interface Landmark {
   curated: boolean;
 }
 
-/** A summit is important if nothing known within this radius stands higher. */
+/** The index lives in world pixels at this zoom, whatever zoom the view is at. */
+export const ATLAS_ZOOM = DEFAULT_ZOOM;
+/**
+ * Levels of discovery: a summit is important at a zoom if nothing known within
+ * this radius stands higher. It widens ×2 per step out (10 km at z12, 40 km at
+ * z10, 160 km at z8), so a zoomed-out view only discovers what matters at
+ * that scale. Curated summits are automatic from DEFAULT_ZOOM in.
+ */
 const DOMINANCE_M = 10_000;
+export const dominanceAt = (zoom: number) => DOMINANCE_M * 2 ** Math.max(0, DEFAULT_ZOOM - zoom);
 /** Two labels closer than this are the same summit. */
 const SAME_PX = 40;
-/** How close to the centre of the screen counts as "arrived". */
+/** How close to the centre of the screen (screen pixels) counts as "arrived". */
 export const CENTRE_PX = 70;
 
 const fmt = new Intl.NumberFormat('en-US');
@@ -33,8 +41,8 @@ const STORE = 'topography:discovered';
 
 /** Metres per world pixel at a world y, at the fixed zoom. */
 function metresPerPx(y: number) {
-  const { lat } = worldToLonLat(0, y, ZOOM);
-  return (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** ZOOM);
+  const { lat } = worldToLonLat(0, y, ATLAS_ZOOM);
+  return (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** ATLAS_ZOOM);
 }
 
 export class Atlas {
@@ -42,19 +50,20 @@ export class Atlas {
 
   constructor() {
     for (const p of PEAKS) {
-      const { x, y } = lonLatToWorld(p.lon, p.lat, ZOOM);
+      const { x, y } = lonLatToWorld(p.lon, p.lat, ATLAS_ZOOM);
       this.marks.push({ key: p.slug, name: p.name, x, y, ele: p.ele, detail: detailOf(p), curated: true });
     }
   }
 
-  /** Index the summits a scene carried (positions relative to its origin). */
-  addPeaks(labels: Label[], originX: number, originY: number) {
+  /** Index the summits a scene at `zoom` carried (positions relative to its origin). */
+  addPeaks(labels: Label[], originX: number, originY: number, zoom: number) {
+    const f = 2 ** (ATLAS_ZOOM - zoom);
     for (const l of labels) {
       if (l.kind !== 'peak' || l.ele === undefined) continue;
-      const x = originX + l.x;
-      const y = originY + l.y;
+      const x = (originX + l.x) * f;
+      const y = (originY + l.y) * f;
       if (this.marks.some((m) => Math.hypot(m.x - x, m.y - y) < SAME_PX)) continue;
-      const { lat, lon } = worldToLonLat(x, y, ZOOM);
+      const { lat, lon } = worldToLonLat(x, y, ATLAS_ZOOM);
       this.marks.push({
         key: `${l.name}@${lat.toFixed(2)},${lon.toFixed(2)}`,
         name: l.name,
@@ -67,21 +76,21 @@ export class Atlas {
     }
   }
 
-  private important(m: Landmark) {
-    if (m.curated) return true;
-    const r = DOMINANCE_M / metresPerPx(m.y);
+  private important(m: Landmark, zoom: number) {
+    if (m.curated && zoom >= DEFAULT_ZOOM) return true;
+    const r = dominanceAt(zoom) / metresPerPx(m.y);
     return !this.marks.some(
       (o) => o !== m && (o.ele ?? 0) > (m.ele ?? 0) && Math.hypot(o.x - m.x, o.y - m.y) < r,
     );
   }
 
-  /** The important summit nearest (x, y) within `radius` world pixels. */
-  near(x: number, y: number, radius: number): Landmark | null {
+  /** The summit important at `zoom` nearest (x, y), within `radius` world pixels. */
+  near(x: number, y: number, radius: number, zoom: number): Landmark | null {
     let best: Landmark | null = null;
     let bestD = radius;
     for (const m of this.marks) {
       const d = Math.hypot(m.x - x, m.y - y);
-      if (d < bestD && this.important(m)) {
+      if (d < bestD && this.important(m, zoom)) {
         best = m;
         bestD = d;
       }

@@ -1,4 +1,4 @@
-import { MAJOR, RAMP } from './config';
+import { INDEX_EVERY, RAMP, RAMP_STEP } from './config';
 import type { SceneResult } from './contour.worker';
 import { drawLabels, drawLines, drawWater, toPath, type Features } from './features';
 
@@ -59,8 +59,14 @@ export interface Scene {
   /** Size in scene pixels (tile pixels at the scene's zoom). */
   width: number;
   height: number;
-  /** Screen pixels per scene pixel: 1 for the map, >1 for a coarser preview. */
-  scale: number;
+  /**
+   * The tile zoom it was built at. Drawn at another view zoom (the coarse
+   * preview, or the old scene mid zoom-step) it is scaled by 2^(Δzoom).
+   */
+  zoom: number;
+  /** Contour interval in metres; index lines every INDEX_EVERY-th. */
+  minor: number;
+  major: number;
   /** Grid downsampling the contours were traced at. */
   ds: number;
   lo: number;
@@ -77,32 +83,34 @@ export function buildScene(
   r: SceneResult,
   features: Features,
   ds: number,
-  scale = 1,
   range?: { lo: number; hi: number },
 ): Scene {
-  // Snap the colour range to index contours so the legend reads cleanly.
-  const lo = range?.lo ?? Math.floor(r.min / MAJOR) * MAJOR;
-  const hi = range?.hi ?? Math.max(lo + MAJOR, Math.ceil(r.max / MAJOR) * MAJOR);
+  const major = r.interval * INDEX_EVERY;
+  // Snap the colour range to round values so the legend reads cleanly.
+  const lo = range?.lo ?? Math.floor(r.min / RAMP_STEP) * RAMP_STEP;
+  const hi = range?.hi ?? Math.max(lo + RAMP_STEP, Math.ceil(r.max / RAMP_STEP) * RAMP_STEP);
   return {
     originX: r.originX,
     originY: r.originY,
     width: r.width,
     height: r.height,
-    scale,
+    zoom: r.z,
+    minor: r.interval,
+    major,
     ds,
     lo,
     hi,
     lines: r.levels.map((c) => ({
       path: toPath(c.coords, c.parts),
       color: ramp((c.value - lo) / (hi - lo)),
-      major: c.value % MAJOR === 0,
+      major: c.value % major === 0,
     })),
     features,
   };
 }
 
-function drawContours(ctx: CanvasRenderingContext2D, scene: Scene) {
-  const { ds, scale } = scene;
+function drawContours(ctx: CanvasRenderingContext2D, scene: Scene, scale: number) {
+  const { ds } = scene;
   // Blur and downsampling soften the outermost cells; keep them off-canvas.
   const edge = 2 * ds;
   ctx.save();
@@ -125,6 +133,7 @@ function drawContours(ctx: CanvasRenderingContext2D, scene: Scene) {
   ctx.restore();
 }
 
+/** `viewX/viewY` are world pixels at `viewZoom`, the zoom the view is at. */
 export function draw(
   ctx: CanvasRenderingContext2D,
   scene: Scene,
@@ -132,15 +141,20 @@ export function draw(
   viewY: number,
   w: number,
   h: number,
+  viewZoom: number,
 ) {
-  const k = scene.scale;
+  const k = 2 ** (viewZoom - scene.zoom);
   const view = { x: viewX / k - scene.originX, y: viewY / k - scene.originY, w: w / k, h: h / k };
   ctx.save();
   ctx.scale(k, k);
   ctx.translate(-view.x, -view.y);
   drawWater(ctx, scene.features, view);
-  drawContours(ctx, scene);
-  drawLines(ctx, scene.features, view);
-  drawLabels(ctx, scene.features, view);
+  drawContours(ctx, scene, k);
+  // A scaled stand-in (mid zoom-step) keeps only its shapes: scaled lines
+  // and text would read as broken.
+  if (k === 1) {
+    drawLines(ctx, scene.features, view);
+    drawLabels(ctx, scene.features, view);
+  }
   ctx.restore();
 }

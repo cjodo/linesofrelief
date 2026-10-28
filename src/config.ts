@@ -1,18 +1,29 @@
-// Opinionated, fixed parameters. The map has one scale and one look.
+// Opinionated parameters: a handful of scales and one look.
 
 /** Where every visit begins: the Three Sisters, Oregon Cascades. */
 export const START = { name: 'Three Sisters', lat: 44.135, lon: -121.772 };
 
-/** Fixed web-mercator zoom: one tile pixel is one CSS pixel. */
-export const ZOOM = 12;
+/**
+ * The web-mercator zooms the view steps through (one tile pixel is one CSS
+ * pixel at each); every visit starts at DEFAULT_ZOOM.
+ */
+export const ZOOMS = [8, 9, 10, 11, 12, 13];
+export const DEFAULT_ZOOM = 12;
 export const TILE = 256;
 
 /** Grid downsampling before contouring; keeps contouring fast and lines smooth. */
 export const DS = 2;
 
-/** Contour intervals in metres. */
-export const MINOR = 50;
-export const MAJOR = 250;
+/**
+ * Contour interval in metres at each zoom; every INDEX_EVERY-th is an index
+ * line. It doubles per step near the default, then grows more gently: the
+ * coarse elevation behind the widest views smooths summits, so strict
+ * doubling would leave them nearly bare.
+ */
+export const INTERVALS: Record<number, number> = { 8: 300, 9: 250, 10: 200, 11: 100, 12: 50, 13: 25 };
+export const INDEX_EVERY = 5;
+/** The colour ramp's ends snap to this, at every zoom (fine enough for wide views). */
+export const RAMP_STEP = 250;
 
 /** Contour simplification tolerance, in downsampled cells. */
 export const SIMPLIFY = 0.12;

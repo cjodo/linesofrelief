@@ -1,4 +1,4 @@
-import { MINOR, SIMPLIFY, TILE } from './config';
+import { SIMPLIFY, TILE } from './config';
 import {
   loadElevation,
   loadVector,
@@ -18,6 +18,10 @@ export interface SceneRequest {
   ty1: number;
   /** Grid downsampling before contouring. */
   ds: number;
+  /** Contour interval in metres. */
+  interval: number;
+  /** Take map tiles one zoom coarser (zoomed-out views: a quarter of the requests). */
+  coarseVectors?: boolean;
   /** Also load water, borders and names. Off for the coarse preview. */
   features: boolean;
 }
@@ -34,11 +38,16 @@ export interface TileFeatures extends Omit<VectorData, 'labels'> {
   /** Tile origin relative to the scene origin, in world pixels. */
   ox: number;
   oy: number;
+  /** Scene pixels per tile pixel: 2 when the tile is one zoom coarser. */
+  scale: number;
 }
 
 export interface SceneResult {
   type: 'scene';
   id: number;
+  /** Tile zoom and contour interval it was built with. */
+  z: number;
+  interval: number;
   /** World-pixel origin and size of the region. */
   originX: number;
   originY: number;
@@ -93,7 +102,14 @@ const kernel: Promise<Kernel> = WebAssembly.instantiateStreaming(fetch(wasmUrl))
   .catch(async () => WebAssembly.instantiate(await (await fetch(wasmUrl)).arrayBuffer()))
   .then(({ instance }) => instance.exports as unknown as Kernel);
 
-function contour(k: Kernel, tiles: Float32Array[], cols: number, rows: number, ds: number) {
+function contour(
+  k: Kernel,
+  tiles: Float32Array[],
+  cols: number,
+  rows: number,
+  ds: number,
+  interval: number,
+) {
   // Stitch and downsample (ds×ds averages) in one pass, straight into wasm
   // memory: the kernel's input is then ds² smaller than the raw tiles.
   const cell = TILE / ds;
@@ -119,7 +135,7 @@ function contour(k: Kernel, tiles: Float32Array[], cols: number, rows: number, d
     }
   });
 
-  k.run(width, height, 1, MINOR, SIMPLIFY);
+  k.run(width, height, 1, interval, SIMPLIFY);
 
   const meta = new Uint32Array(k.memory.buffer, k.meta_ptr(), k.meta_len());
   const coords = new Float32Array(k.memory.buffer, k.coords_ptr(), k.coords_len());
@@ -224,51 +240,72 @@ self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest>) => {
     self.postMessage(await nameAt(msg));
     return;
   }
-  const { id, z, tx0, ty0, tx1, ty1, ds, features } = msg;
-  const cols = tx1 - tx0 + 1;
-  const rows = ty1 - ty0 + 1;
-  const total = cols * rows * (features ? 2 : 1);
+  const { id, z, tx0, ty0, tx1, ty1, ds, features, interval, coarseVectors } = msg;
+
+  // Elevation one zoom coarser does the kernel's 2×2 averaging for free: the
+  // same contour grid from a quarter of the tiles. `ef` is scene px per
+  // elevation-tile px; the region snaps outward to whole coarse tiles.
+  const ef = ds >= 2 ? 2 : 1;
+  const ez = z - Math.log2(ef);
+  const ex0 = Math.floor(tx0 / ef);
+  const ey0 = Math.floor(ty0 / ef);
+  const ecols = Math.floor(tx1 / ef) - ex0 + 1;
+  const erows = Math.floor(ty1 / ef) - ey0 + 1;
+  const originX = ex0 * TILE * ef;
+  const originY = ey0 * TILE * ef;
+
+  // Map tiles: the scene's own zoom, or one coarser when zoomed out.
+  const vf = coarseVectors ? 2 : 1;
+  const vz = z - Math.log2(vf);
+  const vx0 = Math.floor(tx0 / vf);
+  const vy0 = Math.floor(ty0 / vf);
+  const vcols = Math.floor(tx1 / vf) - vx0 + 1;
+  const vrows = Math.floor(ty1 / vf) - vy0 + 1;
+
+  const total = ecols * erows + (features ? vcols * vrows : 0);
   let done = 0;
   const tick = <T>(v: T) => {
     done++;
     self.postMessage({ type: 'progress', id, done, total } satisfies SceneProgress);
     return v;
   };
+  const grid = (x0: number, y0: number, cols: number, rows: number) =>
+    Array.from({ length: cols * rows }, (_, n) => ({ x: x0 + (n % cols), y: y0 + Math.floor(n / cols) }));
 
-  const coords = Array.from({ length: cols * rows }, (_, n) => ({
-    x: tx0 + (n % cols),
-    y: ty0 + Math.floor(n / cols),
-  }));
   const [elevation, vector, k] = await Promise.all([
-    Promise.all(coords.map(({ x, y }) => loadElevation(z, x, y).then(tick))),
-    features ? Promise.all(coords.map(({ x, y }) => loadVector(z, x, y).then(tick))) : [],
+    Promise.all(grid(ex0, ey0, ecols, erows).map(({ x, y }) => loadElevation(ez, x, y).then(tick))),
+    features
+      ? Promise.all(grid(vx0, vy0, vcols, vrows).map(({ x, y }) => loadVector(vz, x, y).then(tick)))
+      : [],
     kernel,
   ]);
 
-  const { levels, min, max } = contour(k, elevation, cols, rows, ds);
+  const { levels, min, max } = contour(k, elevation, ecols, erows, ds / ef, interval);
 
   const tiles: TileFeatures[] = [];
   const labels: Label[] = [];
   const seen = new Set<string>();
   vector.forEach(({ labels: tileLabels, ...geometry }, n) => {
-    const ox = (n % cols) * TILE;
-    const oy = Math.floor(n / cols) * TILE;
-    tiles.push({ ...geometry, ox, oy });
+    const ox = (vx0 + (n % vcols)) * TILE * vf - originX;
+    const oy = (vy0 + Math.floor(n / vcols)) * TILE * vf - originY;
+    tiles.push({ ...geometry, ox, oy, scale: vf });
     for (const l of tileLabels) {
       const key = `${l.kind}:${l.name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      labels.push({ ...l, x: l.x + ox, y: l.y + oy });
+      labels.push({ ...l, x: l.x * vf + ox, y: l.y * vf + oy });
     }
   });
 
   const result: SceneResult = {
     type: 'scene',
     id,
-    originX: tx0 * TILE,
-    originY: ty0 * TILE,
-    width: cols * TILE,
-    height: rows * TILE,
+    z,
+    interval,
+    originX,
+    originY,
+    width: ecols * TILE * ef,
+    height: erows * TILE * ef,
     min,
     max,
     levels,
@@ -277,16 +314,4 @@ self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest>) => {
   };
   // Contour buffers are fresh copies; vector buffers stay cached, so they're cloned.
   self.postMessage(result, { transfer: levels.flatMap((l) => [l.coords.buffer, l.parts.buffer]) });
-
-  // Warm the ring of tiles just beyond this region, so the next one (the
-  // user is panning toward it) comes from cache instead of the network.
-  if (features) {
-    for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) {
-      for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
-        if (tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1) continue;
-        void loadElevation(z, tx, ty);
-        void loadVector(z, tx, ty);
-      }
-    }
-  }
 };

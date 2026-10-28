@@ -1,3 +1,4 @@
+import { DEFAULT_ZOOM, ZOOMS } from './config';
 import { settable } from './text';
 
 /**
@@ -15,6 +16,8 @@ export interface Spot {
   lon: number;
   /** One line under the title, e.g. "8,849 m · Himalaya · Nepal / China". */
   detail?: string;
+  /** Zoom level; absent means DEFAULT_ZOOM. */
+  zoom?: number;
 }
 
 const MAX_NAME = 80;
@@ -32,7 +35,9 @@ export function readSpot(search = location.search): Spot | null {
   // A name the fonts can't set (or an old link carrying one) is re-resolved.
   const raw = p.get('name')?.trim().slice(0, MAX_NAME);
   const name = raw && settable(raw) ? raw : undefined;
-  return { name, lat, lon };
+  const z = Number(p.get('z'));
+  const zoom = ZOOMS.includes(z) ? z : undefined;
+  return { name, lat, lon, zoom };
 }
 
 /** The place this HTML page was generated for, if any. */
@@ -45,11 +50,12 @@ export const pageSpot: Spot | null = (() => {
 })();
 
 /** Elsewhere is always expressed from the root, so links don't inherit a summit's path. */
-export function spotUrl({ name, lat, lon }: Spot): string {
+export function spotUrl({ name, lat, lon, zoom }: Spot): string {
   const p = new URLSearchParams();
   if (name) p.set('name', name);
-  // 4 decimals ≈ 11 m: finer than a pixel at the fixed zoom.
+  // 4 decimals ≈ 11 m: finer than a pixel at the closest zoom.
   p.set('lat', lat.toFixed(4));
   p.set('lon', lon.toFixed(4));
+  if (zoom !== undefined && zoom !== DEFAULT_ZOOM) p.set('z', String(zoom));
   return `${import.meta.env.BASE_URL}?${p}`;
 }

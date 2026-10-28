@@ -1,4 +1,4 @@
-import { INK, TILE, ZOOM } from './config';
+import { INK, TILE } from './config';
 import { toPath } from './features';
 import { loadVector } from './tiles';
 
@@ -59,10 +59,10 @@ export function createMinimap(root: HTMLElement) {
     root.classList.add('ready');
   }
 
-  /** Centre of the view in world pixels at the map's fixed zoom. */
-  function update(x: number, y: number) {
+  /** Centre of the view in world pixels at the view's `zoom`. */
+  function update(x: number, y: number, zoom: number) {
     const { width, height } = size();
-    const k = width / (TILE * 2 ** ZOOM);
+    const k = width / (TILE * 2 ** zoom);
     const px = Math.min(width, Math.max(0, x * k));
     const py = Math.min(height, Math.max(0, y * k - (TOP * width) / TILE));
     marker.style.setProperty('--x', `${px}px`);
