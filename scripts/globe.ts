@@ -1,12 +1,13 @@
 /**
  * Pre-renders the globe's texture (public/globe.png): the whole Earth's
  * contours, equirectangular, in the map's own colours, for the spinning
- * globe on /why/ (src/globe.ts wraps it round a sphere).
+ * wireframe globe on /why/ (src/globe.ts wraps it round a sphere).
  *
  * Elevation comes through the running server (BASE) at zoom 3, the same
- * Terrarium tiles the map uses. Lines every INTERVAL metres, coloured up the
- * map's ramp and brighter with height (as the map's wide views draw them),
- * coastlines in foam, the sea faintly tinted. Use `make globe`.
+ * Terrarium tiles the map uses. Lines only, on a transparent ground: contours
+ * every INTERVAL metres up the map's ramp, stronger with height (as the map's
+ * wide views draw them), coastlines in foam, and a faint graticule every
+ * GRATICULE degrees. Use `make globe`.
  */
 import { writeFileSync } from 'node:fs';
 import { INK, terrainUrl } from '../src/config';
@@ -32,6 +33,8 @@ const DOWNSAMPLE = 4;
 /** Metres between contours; the ramp tops out at PEAK. */
 const INTERVAL = 500;
 const PEAK = 6000;
+/** Degrees between the faint latitude and longitude lines. */
+const GRATICULE = 30;
 /** Colour steps up the ramp (the palette holds 3 + STEPS colours). */
 const STEPS = 48;
 /** Web mercator stops here: nearer the poles there's no data, so no lines
@@ -120,19 +123,20 @@ const hex = (h: string): RGB => {
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
 };
 const css = (c: string): RGB => c.match(/\d+/g)!.slice(0, 3).map(Number) as RGB;
-const mix = (a: RGB, b: RGB, t: number): RGB => a.map((v, i) => Math.round(v + (b[i] - v) * t)) as RGB;
 
-const base = hex(INK.base);
+// Colours and their opacity: the ground is clear, so only lines show.
 const palette: RGB[] = [
-  base, // 0: land
-  mix(base, hex(INK.water), 0.16), // 1: sea
-  mix(base, hex(INK.shore), 0.75), // 2: coastline
+  hex(INK.base), // 0: nothing (transparent)
+  css(ramp(0.5)), // 1: graticule
+  hex(INK.shore), // 2: coastline
 ];
+const alphas = [0, 70, 235];
 const RAMP0 = palette.length;
 for (let s = 0; s < STEPS; s++) {
   const t = s / (STEPS - 1);
+  palette.push(css(ramp(t)));
   // Lowlands recede, high ground glows: the map's wide-view relief emphasis.
-  palette.push(mix(base, css(ramp(t)), 0.3 + 0.7 * t));
+  alphas.push(Math.round(255 * (0.35 + 0.65 * t)));
 }
 
 // --- Lines -------------------------------------------------------------------------
@@ -143,8 +147,10 @@ const band = (i: number) => (land[i] < 0.5 ? -1 : Math.floor(Math.max(0, elev[i]
 const out = new Uint8Array(W * H);
 for (let y = 0; y < H; y++) {
   const lat = 90 - ((y + 0.5) / H) * 180;
+  // Where a parallel of the graticule runs (to within half a texel).
+  const parallel = Math.abs(lat / GRATICULE - Math.round(lat / GRATICULE)) * GRATICULE < 90 / H;
   if (Math.abs(lat) > MAX_LAT) {
-    out.fill(lat < 0 ? 0 : 1, y * W, (y + 1) * W);
+    out.fill(parallel ? 1 : 0, y * W, (y + 1) * W);
     continue;
   }
   for (let x = 0; x < W; x++) {
@@ -156,7 +162,9 @@ for (let y = 0; y < H; y++) {
     const [right, below] = [elev[ri], elev[bi]];
     const [br, bb] = [band(ri), band(bi)];
     if (b === br && b === bb) {
-      out[i] = b < 0 ? 1 : 0;
+      const lon = ((x + 0.5) / W) * 360 - 180;
+      const meridian = Math.abs(lon / GRATICULE - Math.round(lon / GRATICULE)) * GRATICULE < 180 / W;
+      out[i] = parallel || meridian ? 1 : 0;
     } else if (b < 0 || br < 0 || bb < 0) {
       out[i] = 2;
     } else {
@@ -167,6 +175,6 @@ for (let y = 0; y < H; y++) {
   }
 }
 
-const png = encodeIndexedPng(W, H, palette, out);
+const png = encodeIndexedPng(W, H, palette, out, alphas);
 writeFileSync(OUT, png);
 console.log(`wrote ${OUT}  ${W}×${H}, ${palette.length} colours, ${(png.length / 1024).toFixed(0)} KB`);

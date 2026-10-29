@@ -87,9 +87,16 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
 
 /**
  * Minimal PNG encoder for palette images: one byte per pixel indexing up to
- * 256 RGB colours. Few colours over a lot of flat ground compress well.
+ * 256 RGB colours, each with an optional alpha (0-255). Few colours over a
+ * lot of flat ground compress well.
  */
-export function encodeIndexedPng(width: number, height: number, palette: [number, number, number][], indices: Uint8Array): Uint8Array {
+export function encodeIndexedPng(
+  width: number,
+  height: number,
+  palette: [number, number, number][],
+  indices: Uint8Array,
+  alphas?: number[],
+): Uint8Array {
   if (palette.length > 256) throw new Error('palette over 256 colours');
   const ihdr = new Uint8Array(13);
   const v = new DataView(ihdr.buffer);
@@ -105,6 +112,7 @@ export function encodeIndexedPng(width: number, height: number, palette: [number
     new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
     chunk('PLTE', Uint8Array.from(palette.flat())),
+    ...(alphas ? [chunk('tRNS', Uint8Array.from(alphas))] : []),
     chunk('IDAT', deflateSync(raw, { level: 9 })),
     chunk('IEND', new Uint8Array()),
   ];
