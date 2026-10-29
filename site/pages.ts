@@ -390,7 +390,6 @@ export function favoritesNav(): string {
   return `<details class="favs">
           <summary>Favourites</summary>
           <div class="favs-panel">
-            <p>The creator's favourites</p>
             <ul>${items}</ul>
           </div>
         </details>`;
