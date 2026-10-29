@@ -27,3 +27,6 @@ npm-debug.log*
 *~
 .DS_Store
 Thumbs.db
+
+# Agent tooling (installed skills)
+.agents/
