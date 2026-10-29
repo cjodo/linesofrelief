@@ -30,6 +30,11 @@ LOVE = '#eb6f92'
 BASE = '#191724'
 # The model's edges, drawn as lines over the clay: Rosé Pine's subtle neutral.
 EDGE = '#908caa'
+# Its site model (LANDMARKS_SITE): the city in neutrals, its water in pine.
+SITE_GROUND = '#26233a'
+SITE_BUILDINGS = '#524f67'
+SITE_WATER = '#31748f'
+SITE_PLINTH = '#1f1d2e'
 SCENE = 'Landmarks'
 
 
@@ -67,6 +72,15 @@ def clay():
     bsdf = next(n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
     bsdf.inputs['Base Color'].default_value = linear(LOVE)
     bsdf.inputs['Roughness'].default_value = 0.62
+    return mat
+
+
+def matte(name, hex_colour, roughness=0.8):
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = next(n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    bsdf.inputs['Base Color'].default_value = linear(hex_colour)
+    bsdf.inputs['Roughness'].default_value = roughness
     return mat
 
 
@@ -517,6 +531,134 @@ def sydney_opera_house():
     shell('Restaurant b', -42, -82, 1, 18, 22, 20)
 
 
+# --- Site models -----------------------------------------------------------------
+
+# How far round each landmark its own model stands: the map's buildings there are left out.
+CLEAR = {
+    'eiffel-tower': 75,
+    'great-pyramid-of-giza': 130,
+    'taj-mahal': 60,
+    'colosseum': 100,
+    'burj-khalifa': 80,
+    'sydney-opera-house': 95,
+}
+
+
+def site_model(path, clear_r, pyramids=False):
+    """
+    The ground round a landmark (scripts/landmark-sites.ts): terrain, water,
+    buildings, on a round plinth. With `pyramids`, tall square buildings are
+    raised as pyramids, which is what they are at Giza (the map has them as boxes).
+    """
+    import json
+
+    with open(path) as f:
+        site = json.load(f)
+    r, step, n = site['radius'], site['step'], site['n']
+    heights, wet = site['heights'], site['water']
+    col = bpy.data.collections.new('Site')
+    bpy.context.scene.collection.children.link(col)
+    at = lambda i: -r + i * step
+    height = lambda i, j: heights[j * n + i]
+
+    # Elevation over water is noisy (the Yamuna's holes reach 130 m down): water
+    # lies flat at its median, and nothing is lower than it or the ground's 1st percentile.
+    wet_heights = sorted(heights[k] for k in range(n * n) if wet[k] == '1')
+    water_z = wet_heights[len(wet_heights) // 2] if wet_heights else None
+    floor_z = sorted(heights)[len(heights) // 100]
+    if water_z is not None:
+        floor_z = max(floor_z, water_z)
+    heights = [max(h, floor_z) for h in heights]
+    bm = bmesh.new()
+    verts = {}
+
+    def vert(i, j):
+        if (i, j) not in verts:
+            k = j * n + i
+            z = water_z if water_z is not None and wet[k] == '1' else heights[k]
+            verts[i, j] = bm.verts.new((at(i), at(j), z))
+        return verts[i, j]
+
+    for j in range(n - 1):
+        for i in range(n - 1):
+            if math.hypot(at(i) + step / 2, at(j) + step / 2) > r:
+                continue
+            face = bm.faces.new((vert(i, j), vert(i + 1, j), vert(i + 1, j + 1), vert(i, j + 1)))
+            corners = (j * n + i, j * n + i + 1, (j + 1) * n + i + 1, (j + 1) * n + i)
+            face.material_index = 1 if all(wet[c] == '1' for c in corners) else 0
+    # The plinth: the grid's stepped edge pulled out onto the circle, then carried straight down.
+    rim = [e for e in bm.edges if e.is_boundary]
+    for v in {v for e in rim for v in e.verts}:
+        d = math.hypot(v.co.x, v.co.y)
+        v.co.x, v.co.y = v.co.x * r / d, v.co.y * r / d
+    base = min(heights) - 12
+    down = bmesh.ops.extrude_edge_only(bm, edges=rim)['geom']
+    for v in (g for g in down if isinstance(g, bmesh.types.BMVert)):
+        v.co.z = base
+    for face in (g for g in down if isinstance(g, bmesh.types.BMFace)):
+        face.material_index = 2
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    me = bpy.data.meshes.new('Terrain')
+    bm.to_mesh(me)
+    bm.free()
+    for mat in (matte('Site ground', SITE_GROUND), matte('Site water', SITE_WATER, 0.6), matte('Site plinth', SITE_PLINTH)):
+        me.materials.append(mat)
+    terrain = bpy.data.objects.new('Terrain', me)
+    col.objects.link(terrain)
+
+    # Buildings: each footprint (with its courtyards) filled and raised to its height.
+    def ground_at(x, y):
+        i = min(n - 1, max(0, round((x + r) / step)))
+        j = min(n - 1, max(0, round((y + r) / step)))
+        return height(i, j)
+
+    bm = bmesh.new()
+    kept = 0
+    for b in site['buildings']:
+        outer = b['rings'][0]
+        cx = sum(p[0] for p in outer) / len(outer)
+        cy = sum(p[1] for p in outer) / len(outer)
+        if math.hypot(cx, cy) < clear_r:
+            continue
+        z0 = ground_at(cx, cy) + b['min']
+        h = max(1.0, b['h'] - b['min'])
+        xs, ys = [p[0] for p in outer], [p[1] for p in outer]
+        w, d = max(xs) - min(xs), max(ys) - min(ys)
+        if pyramids and h >= 25 and len(b['rings']) == 1 and 0.8 < w / d < 1.25:
+            pts = outer[:-1] if outer[0] == outer[-1] else outer
+            vs = [bm.verts.new((x, y, z0)) for x, y in pts]
+            apex = bm.verts.new((cx, cy, z0 + h))
+            bm.faces.new(list(reversed(vs)))
+            for k in range(len(vs)):
+                bm.faces.new((vs[k], vs[(k + 1) % len(vs)], apex))
+            kept += 1
+            continue
+        edges = []
+        for ring in b['rings']:
+            pts = ring[:-1] if ring[0] == ring[-1] else ring
+            if len(pts) < 3:
+                continue
+            vs = [bm.verts.new((x, y, z0)) for x, y in pts]
+            edges += [bm.edges.new((vs[k], vs[(k + 1) % len(vs)])) for k in range(len(vs))]
+        if not edges:
+            continue
+        floor = [g for g in bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=True, edges=edges)['geom'] if isinstance(g, bmesh.types.BMFace)]
+        if not floor:
+            continue
+        up = bmesh.ops.extrude_face_region(bm, geom=floor)['geom']
+        bmesh.ops.translate(bm, vec=(0, 0, h), verts=[g for g in up if isinstance(g, bmesh.types.BMVert)])
+        kept += 1
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    me = bpy.data.meshes.new('Buildings')
+    bm.to_mesh(me)
+    bm.free()
+    me.materials.append(matte('Site buildings', SITE_BUILDINGS))
+    col.objects.link(bpy.data.objects.new('Buildings', me))
+    print(f'site: {kept} buildings, terrain {len(me.vertices)} verts')
+    return col
+
+
 # slug: (builder, camera azimuth°, elevation°, resolution (w, h))
 LANDMARKS = {
     'eiffel-tower': (eiffel_tower, 35, 12, (1200, 1600)),
@@ -620,7 +762,8 @@ def frame(sc, azimuth, elevation, objects, margin=0.9):
     return lo
 
 
-def build(slug):
+def build(slug, site=None):
+    """The landmark, alone, or on its site model when `site` names its .json."""
     global MAT, COL
     builder, azimuth, elevation, res = LANDMARKS[slug]
     sc = scene()
@@ -629,8 +772,11 @@ def build(slug):
     sc.collection.children.link(COL)
     MAT = clay()
     builder()
-    setup(sc, res)
     shown = [o for o in COL.all_objects if not o.hide_render]
+    if site:
+        res, elevation = (1600, 1100), max(elevation, 28)
+        shown = list(site_model(site, CLEAR.get(slug, 0), pyramids=slug == 'great-pyramid-of-giza').objects)
+    setup(sc, res)
     lo = frame(sc, azimuth, elevation, shown)
     light(sc, azimuth)
     size = max(sc.camera.location.length, 1000) * 3
@@ -643,6 +789,8 @@ def build(slug):
 
 
 def render(slug, root):
+    if os.environ.get('LANDMARKS_SITE'):
+        return render_site(slug, root)
     sc = build(slug)
     if os.environ.get('LANDMARKS_OG_ONLY'):
         return og(sc, slug, root)
@@ -655,6 +803,19 @@ def render(slug, root):
     bpy.ops.render.render(write_still=True, scene=sc.name)
     if not os.environ.get('LANDMARKS_PERCENT'):
         og(sc, slug, root)
+    return out
+
+
+def render_site(slug, root):
+    """The landmark on its site model: public/landmarks/<slug>-site.webp."""
+    sc = build(slug, os.path.join(root, '.cache', 'landmarks', f'{slug}.json'))
+    out = os.path.join(root, 'public', 'landmarks', f'{slug}-site.webp')
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    sc.render.image_settings.file_format = 'WEBP'
+    sc.render.image_settings.color_mode = 'RGBA'
+    sc.render.image_settings.quality = 88
+    sc.render.filepath = out
+    bpy.ops.render.render(write_still=True, scene=sc.name)
     return out
 
 
