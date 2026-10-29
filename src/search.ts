@@ -1,4 +1,5 @@
 import { SEARCH_URL } from './config';
+import { parseCoords } from './coords';
 
 export interface Place {
   name: string;
@@ -47,6 +48,22 @@ function rank(places: Place[], q: string): Place[] {
     .map((p, i) => ({ p, s: score(p, i) }))
     .sort((a, b) => b.s - a.s)
     .map(({ p }) => p);
+}
+
+/** Web mercator stops short of the poles; coordinates past this are pulled in. */
+const MAX_LAT = 85;
+const deg = (v: number, pos: string, neg: string) => `${Math.abs(v).toFixed(4)}° ${v >= 0 ? pos : neg}`;
+
+/** Typed coordinates as a search result: the map names the place on arrival. */
+function coordinatePlace({ lat, lon }: { lat: number; lon: number }): Place {
+  const clamped = Math.max(-MAX_LAT, Math.min(MAX_LAT, lat));
+  return {
+    name: `${deg(clamped, 'N', 'S')}, ${deg(lon, 'E', 'W')}`,
+    lat: clamped,
+    lon,
+    kind: 'coordinates',
+    context: clamped === lat ? '' : `as near the pole as the map goes`,
+  };
 }
 
 const MIN_CHARS = 2;
@@ -132,6 +149,14 @@ export function createSearch(root: HTMLElement, onPick: (place: Place) => void) 
     clearTimeout(timer);
     controller?.abort();
     const q = input.value.trim();
+    // Coordinates need no lookup: offer them at once.
+    const at = parseCoords(q);
+    if (at) {
+      results = [coordinatePlace(at)];
+      active = 0;
+      root.classList.remove('empty');
+      return render();
+    }
     if (q.length < MIN_CHARS) return close();
     timer = window.setTimeout(async () => {
       controller = new AbortController();

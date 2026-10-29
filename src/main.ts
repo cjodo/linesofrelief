@@ -1084,7 +1084,9 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 window.addEventListener('resize', resize);
 createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) => {
   track('search_select', { kind: place.kind, name: place.name });
-  arrive(place, { push: true, announce: true, keepZoom: true });
+  // Typed coordinates carry no name: the map names the place it lands on.
+  const spot = place.kind === 'coordinates' ? { lat: place.lat, lon: place.lon } : place;
+  arrive(spot, { push: true, announce: true, keepZoom: true });
 });
 createShare(document.querySelector<HTMLButtonElement>('#share')!, () => {
   const link = currentLink();
