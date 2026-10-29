@@ -37,7 +37,13 @@ function readPart(s: string, from: number): [Part, number] | null {
 
 /** Latitude and longitude, or null when `text` isn't a pair of coordinates. */
 export function parseCoords(text: string): { lat: number; lon: number } | null {
-  const s = text.trim().toUpperCase().replace(/[’‘]/g, "'").replace(/[”“]/g, '"');
+  // Pasted text brings look-alikes: ordinal º, ring ˚ and superscript ⁰ for the degree sign.
+  const s = text
+    .trim()
+    .toUpperCase()
+    .replace(/[º˚⁰]/g, '°')
+    .replace(/[’‘]/g, "'")
+    .replace(/[”“]/g, '"');
   const first = readPart(s, 0);
   if (!first) return null;
   const second = readPart(s, first[1]);
