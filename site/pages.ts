@@ -515,6 +515,14 @@ const PAGE_CSS = `
       .landmark-text .cta { border-color: color-mix(in srgb, var(--love) 45%, var(--overlay)); }
       .landmark-text .cta:hover, .landmark-text .cta:focus-visible { color: var(--love); border-color: var(--love); }
       .near.landmarks li a:hover .name { color: var(--love); }
+      /* /landmarks/: the renders in a grid, each a link to its page. */
+      .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 0; margin: 56px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--overlay); }
+      .gallery a { display: grid; gap: 6px; padding: 24px 12px 22px; border-bottom: 1px solid var(--overlay); text-decoration: none; }
+      .gallery img { display: block; width: 100%; height: 240px; object-fit: contain; transition: transform 0.3s; }
+      .gallery a:hover img, .gallery a:focus-visible img { transform: translateY(-4px); }
+      .gallery .name { margin-top: 10px; font: italic 400 1.6rem/1.05 var(--serif); transition: color 0.2s; }
+      .gallery a:hover .name, .gallery a:focus-visible .name { color: var(--love); }
+      .gallery .where { font: 400 0.62rem/1.4 var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
       .near { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--overlay); }
       .near li a {
         display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
@@ -538,7 +546,7 @@ interface Shell {
   favicon: string;
   version?: (path: string) => string | undefined;
   /** The nav's current item: the index, /why/, a landmark, or a summit (with a link to its map). */
-  current: 'summits' | 'why' | 'landmark' | Peak;
+  current: 'summits' | 'landmarks' | 'why' | 'landmark' | Peak;
   /** Where "Live map" goes, when it isn't a summit's own map. */
   live?: { href: string; name: string };
   body: string;
@@ -794,6 +802,64 @@ ${
 
 // --- Landmarks ----------------------------------------------------------------
 
+export function landmarksHubPage(site: string): Page {
+  return {
+    path: '/landmarks/',
+    title: `Landmarks · ${SITE_NAME}`,
+    description:
+      `${LANDMARKS.length} famous buildings, from the Great Pyramid to the Burj Khalifa, modelled in clay ` +
+      'in Rosé Pine red, each with the ground it stands on as a contour map.',
+    image: landmarkImage(LANDMARKS[0]),
+    imageAlt: 'Clay models of famous buildings, rendered in Rosé Pine red on a dark background',
+    jsonLd: [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        name: 'Landmarks',
+        itemListElement: LANDMARKS.map((l, i) => ({
+          '@type': 'ListItem',
+          position: i + 1,
+          url: `${site}${landmarkPath(l)}`,
+          name: l.name,
+        })),
+      },
+    ],
+  };
+}
+
+/** The /landmarks/ index: every render, each a link to its page. */
+export function landmarksHubHtml(
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version?: (path: string) => string | undefined,
+): string {
+  const page = landmarksHubPage(site);
+  const cards = LANDMARKS.map((l) => {
+    const v = version?.(landmarkRender(l));
+    return `
+        <li>
+          <a href="${landmarkPath(l)}">
+            <img src="${landmarkRender(l)}${v ? `?v=${v}` : ''}" alt="" loading="lazy" />
+            <span class="name">${esc(l.name)}</span>
+            <span class="where">${esc(l.city)} · ${esc(l.country)} · ${fmt.format(l.height)} m</span>
+          </a>
+        </li>`;
+  }).join('');
+  return shell({
+    page,
+    site,
+    stylesheet,
+    favicon,
+    version,
+    current: 'landmarks',
+    body: `      <h1>Landmarks</h1>
+      <p class="lede">${esc(page.description)}</p>
+      <ul class="gallery">${cards}
+      </ul>`,
+  });
+}
+
 /** Where a landmark's "live map" link arrives: the map, at the closest scale. */
 export const landmarkMap = (l: Landmark) =>
   `/?${new URLSearchParams({ name: l.name, lat: String(l.lat), lon: String(l.lon), z: '13' })}`;
@@ -890,6 +956,7 @@ export function sitemap(site: string, hasImage: (p: Peak) => boolean): string {
   const urls: { loc: string; image?: string }[] = [
     { loc: `${site}/`, image: `${site}/og.jpg` },
     { loc: `${site}/mountains/` },
+    { loc: `${site}/landmarks/` },
     { loc: `${site}/why/` },
     ...PEAKS.map((p) => ({
       loc: `${site}${peakPath(p)}`,

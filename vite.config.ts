@@ -10,6 +10,7 @@ import {
   favoritesNav,
   hubHtml,
   landmarkHtml,
+  landmarksHubHtml,
   mapPath,
   peakPage,
   peakPath,
@@ -47,6 +48,7 @@ useAnalytics(TAG_OK ? TAG_ID : '');
 const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?(map\/?)?)?$/;
 const WHY_ROUTE = /^\/why\/?$/;
 const LANDMARK_ROUTE = /^\/landmarks\/([a-z0-9-]+)\/?$/;
+const LANDMARKS_ROUTE = /^\/landmarks\/?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
 
 const hasPrerender = (key: string) =>
@@ -121,6 +123,12 @@ function sitePages(): Plugin {
           res.end(whyHtml(SITE_URL, '/src/style.css', faviconOf(template), `/${GLOBE_ENTRY}`, publicVersion));
           return;
         }
+        if (LANDMARKS_ROUTE.test(path)) {
+          const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
+          res.setHeader('Content-Type', 'text/html');
+          res.end(landmarksHubHtml(SITE_URL, '/src/style.css', faviconOf(template), publicVersion));
+          return;
+        }
         const landmark = LANDMARKS.find((l) => l.slug === path.match(LANDMARK_ROUTE)?.[1]);
         if (landmark) {
           const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
@@ -173,6 +181,11 @@ function sitePages(): Plugin {
           });
         }
 
+        this.emitFile({
+          type: 'asset',
+          fileName: 'landmarks/index.html',
+          source: landmarksHubHtml(SITE_URL, stylesheet, favicon, publicVersion),
+        });
         for (const l of LANDMARKS) {
           this.emitFile({
             type: 'asset',
