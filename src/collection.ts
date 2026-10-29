@@ -3,43 +3,55 @@ import { MUSEUM_ICON } from './features';
 import type { Label } from './tiles';
 
 /**
- * A town's museums, unfolding from its dot: a small inventory of slots, one
- * per museum, that open in turn. Picking one travels there.
+ * A town's museums: a small inventory that grows out of the badge behind
+ * its dot. Hovering, it travels with the pointer, just behind its tip; a
+ * click pins it in place so a museum can be picked.
  */
 
 /** Slots shown before "and N more". */
 const MAX_SLOTS = 8;
-/** Grace period for the pointer to cross from the dot into the panel. */
-const HIDE_MS = 220;
-/** The panel's corner sits this far from the dot it unfolds from. */
-const OFFSET = { x: 14, y: -16 };
+/** Leaving the town closes it after this long (pointer jitter at the edge). */
+const HIDE_MS = 160;
+/** The panel's corner sits this far below-right of the pointer's tip. */
+const TRAIL = { x: 16, y: 18 };
+const EDGE = 12;
 
 const icon = (cls = '') =>
   `<svg class="${cls}" viewBox="0 0 16 16" aria-hidden="true"><path d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/></svg>`;
 
 export interface Collection {
-  /** Open for the town whose dot is at screen (x, y); the same town only stays open. */
-  show(key: string, town: string, museums: Label[], x: number, y: number): void;
-  /** Close after a moment, unless the pointer reaches the panel. */
+  /**
+   * Open for a town, growing from its badge at screen `from`, to sit by the
+   * pointer at `at`. Already open for this town: just follow the pointer.
+   */
+  show(key: string, town: string, museums: Label[], from: Point, at: Point): void;
+  /** Hold still and take clicks. */
+  pin(): void;
   hideSoon(): void;
   hide(): void;
   readonly openKey: string | null;
+  readonly pinned: boolean;
+}
+
+interface Point {
+  x: number;
+  y: number;
 }
 
 export function createCollection(root: HTMLElement, onPick: (museum: Label) => void): Collection {
   let openKey: string | null = null;
+  let pinned = false;
   let timer = 0;
   let shown: Label[] = [];
+  let size = { w: 0, h: 0 };
 
   const hide = () => {
     clearTimeout(timer);
     openKey = null;
-    root.classList.remove('open');
+    pinned = false;
+    root.classList.remove('open', 'pinned');
   };
   root.addEventListener('pointerenter', () => clearTimeout(timer));
-  root.addEventListener('pointerleave', (e) => {
-    if (e.pointerType === 'mouse') api.hideSoon();
-  });
   root.addEventListener('click', (e) => {
     const slot = (e.target as Element).closest<HTMLElement>('[data-slot]');
     if (!slot) return;
@@ -51,14 +63,31 @@ export function createCollection(root: HTMLElement, onPick: (museum: Label) => v
     if (e.key === 'Escape' && openKey) hide();
   });
 
-  const api: Collection = {
+  /** Beside the pointer, flipping to stay on screen. */
+  function place(at: Point) {
+    const right = at.x + TRAIL.x + size.w > innerWidth - EDGE;
+    const below = at.y + TRAIL.y + size.h > innerHeight - EDGE;
+    const left = right ? at.x - TRAIL.x - size.w : at.x + TRAIL.x;
+    const top = below ? at.y - TRAIL.y - size.h : at.y + TRAIL.y;
+    root.style.translate = `${Math.max(EDGE, left)}px ${Math.max(EDGE, top)}px`;
+    return { left: Math.max(EDGE, left), top: Math.max(EDGE, top) };
+  }
+
+  return {
     get openKey() {
       return openKey;
     },
-    show(key, town, museums, x, y) {
+    get pinned() {
+      return pinned;
+    },
+    show(key, town, museums, from, at) {
       clearTimeout(timer);
-      if (key === openKey) return;
+      if (key === openKey) {
+        if (!pinned) place(at);
+        return;
+      }
       openKey = key;
+      pinned = false;
       shown = museums.slice(0, MAX_SLOTS);
       const more = museums.length - shown.length;
       root.innerHTML = `
@@ -67,37 +96,34 @@ export function createCollection(root: HTMLElement, onPick: (museum: Label) => v
         <ol>${shown
           .map(
             (m, i) =>
-              `<li style="--i:${i}"><button type="button" data-slot="${i}"><span class="slot">${icon()}</span><span class="name">${escape(m.name)}</span></button></li>`,
+              `<li style="--i:${i}"><button type="button" data-slot="${i}" tabindex="-1"><span class="slot">${icon()}</span><span class="name">${escape(m.name)}</span></button></li>`,
           )
           .join('')}</ol>
         ${more > 0 ? `<p class="more" style="--i:${shown.length}">and ${more} more</p>` : ''}`;
 
-      // Unfold to the right of the dot, or to its left where there's no room.
-      root.classList.remove('open', 'flip');
-      // Measured from the corner, where it has room for its natural width.
-      root.style.left = '0px';
-      root.style.top = '0px';
+      root.classList.remove('open', 'pinned');
+      root.style.translate = '0px 0px';
       // Layout size: the closed panel is scaled down, which offset sizes ignore.
-      const [width, height] = [root.offsetWidth, root.offsetHeight];
-      const flip = x + OFFSET.x + width > innerWidth - 16;
-      root.classList.toggle('flip', flip);
-      const left = flip ? x - OFFSET.x - width : x + OFFSET.x;
-      const top = Math.max(16, Math.min(y + OFFSET.y, innerHeight - height - 16));
-      root.style.left = `${left}px`;
-      root.style.top = `${top}px`;
-      // Unfolds from the dot itself.
-      root.style.transformOrigin = `${x - left}px ${y - top}px`;
-      void root.offsetWidth; // start the unfolding from closed
+      size = { w: root.offsetWidth, h: root.offsetHeight };
+      const { left, top } = place(at);
+      // It grows out of the badge, wherever the panel lands.
+      root.style.transformOrigin = `${from.x - left}px ${from.y - top}px`;
+      void root.offsetWidth; // start from closed
       root.classList.add('open');
     },
-    hideSoon() {
+    pin() {
       if (!openKey) return;
+      pinned = true;
+      root.classList.add('pinned');
+      for (const b of root.querySelectorAll('button')) b.tabIndex = 0;
+    },
+    hideSoon() {
+      if (!openKey || pinned) return;
       clearTimeout(timer);
       timer = window.setTimeout(hide, HIDE_MS);
     },
     hide,
   };
-  return api;
 }
 
 function escape(s: string) {

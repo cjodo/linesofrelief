@@ -984,7 +984,11 @@ body:has(.search.searching) .loading-bar {
 
 .collection {
   position: fixed;
+  left: 0;
+  top: 0;
   z-index: 4;
+  /* Trailing the pointer it lets events through; pinned, it takes them. */
+  pointer-events: none;
   min-width: 11rem;
   max-width: 17rem;
   padding: 12px 12px 10px;
@@ -995,22 +999,20 @@ body:has(.search.searching) .loading-bar {
   box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.6);
   visibility: hidden;
   opacity: 0;
-  transform: scale(0.15);
-  clip-path: inset(0 100% 100% 0);
+  transform: scale(0.08);
   transition:
-    opacity 0.18s ease,
-    transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
-    clip-path 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
-    visibility 0s linear 0.32s;
+    opacity 0.2s ease,
+    transform 0.34s cubic-bezier(0.2, 0.9, 0.25, 1),
+    visibility 0s linear 0.34s;
 }
-.collection.flip {
-  clip-path: inset(0 0 100% 100%);
+.collection.pinned {
+  pointer-events: auto;
+  border-color: color-mix(in srgb, var(--love) 55%, var(--overlay));
 }
 .collection.open {
   visibility: visible;
   opacity: 1;
   transform: none;
-  clip-path: inset(0);
   transition-delay: 0s;
 }
 .collection header {
@@ -1365,7 +1367,6 @@ body:not(.loaded) .locator {
   .collection li,
   .collection .more {
     transform: none;
-    clip-path: none;
   }
   .consent-card {
     transition: opacity 0.3s ease;

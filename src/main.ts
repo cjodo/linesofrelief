@@ -21,6 +21,7 @@ import type {
 } from './contour.worker';
 import { ATLAS_ZOOM, Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
 import {
+  badgeOffset,
   buildFeatures,
   DOT,
   labelKey,
@@ -741,7 +742,16 @@ async function acceptScene(msg: SceneResult) {
   document.body.classList.remove('busy');
   const keep = new Set(scene?.features.labels.map((p) => labelKey(p.label)));
   const labels = withSummits(msg);
-  const features = buildFeatures(ctx, msg.tiles, labels, msg.width, msg.height, sceneMpp(msg), keep);
+  const features = buildFeatures(
+    ctx,
+    msg.tiles,
+    labels,
+    msg.width,
+    msg.height,
+    sceneMpp(msg),
+    msg.z,
+    keep,
+  );
   lastScene = msg;
   // One colour scale per arrival; re-fit only on reaching wholly new terrain.
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
@@ -913,13 +923,20 @@ function townAt(sx: number, sy: number): PlacedLabel | null {
   return null;
 }
 
-function openTown(p: PlacedLabel) {
-  collectionOrigin = { x: scene!.originX, y: scene!.originY };
-  collectionTown = p.label.name;
-  const sx = p.label.x + scene!.originX - (cx - w / 2);
-  const sy = p.label.y + scene!.originY - (cy - h / 2);
-  if (collection.openKey !== labelKey(p.label)) track('museums_open', { town: p.label.name });
-  collection.show(labelKey(p.label), p.label.name, p.museums!, sx, sy);
+/** Open (or follow with) a town's museums; the pointer is at screen (px, py). */
+function openTown(p: PlacedLabel, px: number, py: number) {
+  const key = labelKey(p.label);
+  if (collection.openKey !== key) {
+    collectionOrigin = { x: scene!.originX, y: scene!.originY };
+    collectionTown = p.label.name;
+    track('museums_open', { town: p.label.name });
+  }
+  const badge = badgeOffset(DOT[p.label.kind] ?? 0);
+  const from = {
+    x: p.label.x + badge.x + scene!.originX - (cx - w / 2),
+    y: p.label.y + badge.y + scene!.originY - (cy - h / 2),
+  };
+  collection.show(key, p.label.name, p.museums!, from, { x: px, y: py });
 }
 
 // --- Pointer input: drag pans, pinch steps zoom (once per gesture) -----------
@@ -959,7 +976,7 @@ canvas.addEventListener('pointermove', (e) => {
     // Hovering (no button down): famous peaks show as links.
     if (e.pointerType === 'mouse') {
       const town = townAt(e.clientX, e.clientY);
-      if (town) openTown(town);
+      if (town) openTown(town, e.clientX, e.clientY);
       else collection.hideSoon();
       canvas.classList.toggle('linkable', town !== null || famousPeakAt(e.clientX, e.clientY) !== null);
     }
@@ -994,8 +1011,11 @@ const endPointer = (e: PointerEvent) => {
     // A tap on a town opens its museums (touch has no hover); elsewhere closes them.
     const town = townAt(e.clientX, e.clientY);
     const peak = town ? null : famousPeakAt(e.clientX, e.clientY);
-    if (town) openTown(town);
-    else collection.hide();
+    // A click pins the list where it is, so a museum can be picked.
+    if (town) {
+      openTown(town, e.clientX, e.clientY);
+      collection.pin();
+    } else collection.hide();
     if (peak) location.assign(`/mountains/${peak.key}/`);
   }
   if (pointers.size < 2) pinch = null;
@@ -1082,7 +1102,7 @@ createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
   const keep = new Set(scene.features.labels.map((p) => labelKey(p.label)));
   scene = {
     ...scene,
-    features: buildFeatures(ctx, m.tiles, m.labels, m.width, m.height, sceneMpp(m), keep),
+    features: buildFeatures(ctx, m.tiles, m.labels, m.width, m.height, sceneMpp(m), m.z, keep),
   };
   requestDraw();
 });

@@ -1,4 +1,4 @@
-import { INK, MONO, SERIF, TILE } from './config';
+import { INK, MONO, MUSEUM_ICON_ZOOM, SERIF, TILE } from './config';
 import type { TileFeatures } from './contour.worker';
 import type { Geometry, Label, LabelKind } from './tiles';
 
@@ -84,6 +84,11 @@ export const MUSEUM_ICON =
 let museumPath: Path2D | null = null;
 /** Half the icon's size, for its placement box. */
 const MUSEUM_HALF = 9;
+/** The badge behind a settlement's dot: half its size, and its tilt. */
+const BADGE_HALF = (dot: number) => dot + 3.5;
+const BADGE_TILT = -0.17;
+/** Where a settlement's badge sits, from its anchor (screen px at text size 1). */
+export const badgeOffset = (dot: number) => ({ x: dot + 2, y: -dot * 0.5 - 1.5 });
 
 /** Settlement dot radius; names sit just above the dot. */
 export const DOT: Partial<Record<LabelKind, number>> = { city: 3, town: 2.2, village: 1.6 };
@@ -121,11 +126,12 @@ function placeLabels(
   w: number,
   h: number,
   keep: Set<string>,
+  collections: Map<Label, Label[]>,
 ) {
   const kept = (l: Label) => (keep.has(labelKey(l)) ? 0 : 1);
-  const sorted = [...labels].sort(
-    (a, b) => kept(a) - kept(b) || STYLE[a.kind].order - STYLE[b.kind].order || a.rank - b.rank,
-  );
+  // A settlement with museums comes before summits: its dot carries them.
+  const order = (l: Label) => (collections.has(l) ? 0.5 : STYLE[l.kind].order);
+  const sorted = [...labels].sort((a, b) => kept(a) - kept(b) || order(a) - order(b) || a.rank - b.rank);
   const placed: PlacedLabel[] = [];
   ctx.save();
   for (const label of sorted) {
@@ -148,6 +154,8 @@ function placeLabels(
       local = dot
         ? [-width / 2, -dot - DOT_GAP - size - 2, width / 2, dot + 1]
         : [-width / 2, -size / 2 - 2, width / 2, size / 2 + 2];
+      // Room for the museum badge behind the dot.
+      if (dot && collections.has(label)) local[2] = Math.max(local[2], badgeOffset(dot).x + BADGE_HALF(dot));
     }
     const k = labelScale;
     const box: PlacedLabel['box'] = [
@@ -157,8 +165,12 @@ function placeLabels(
       label.y + local[3] * k,
     ];
     const gap = s.gap * k;
-    if (placed.some((p) => overlaps(p.box, box, Math.max(gap, STYLE[p.label.kind].gap * k)))) continue;
-    placed.push({ label, text, box });
+    // Museums and their towns ask only their own clear space: a summit's
+    // wide berth would otherwise hide every museum near a named peak.
+    const lean = label.kind === 'museum' || collections.has(label);
+    const clear = (p: PlacedLabel) => (lean ? gap : Math.max(gap, STYLE[p.label.kind].gap * k));
+    if (placed.some((p) => overlaps(p.box, box, clear(p)))) continue;
+    placed.push({ label, text, box, museums: collections.get(label) });
   }
   ctx.restore();
   return placed;
@@ -168,25 +180,32 @@ function placeLabels(
 const MUSEUM_REACH: Partial<Record<LabelKind, number>> = { city: 10_000, town: 4_000, village: 2_000 };
 
 /**
- * Give each museum to the settlement on the map it most belongs to: the
- * nearest relative to the settlement's reach, so a city outreaches a village.
+ * Give each museum to the settlement it most belongs to: the nearest
+ * relative to the settlement's reach, so a city outreaches a village.
  */
-function gatherMuseums(placed: PlacedLabel[], labels: Label[], mpp: number) {
-  const towns = placed.filter((p) => MUSEUM_REACH[p.label.kind]);
+function gatherMuseums(labels: Label[], mpp: number) {
+  const towns = labels.filter((l) => MUSEUM_REACH[l.kind]);
+  const collections = new Map<Label, Label[]>();
   for (const m of labels) {
     if (m.kind !== 'museum') continue;
-    let home: PlacedLabel | null = null;
+    let home: Label | null = null;
     let best = 1;
     for (const t of towns) {
-      const r = (Math.hypot(t.label.x - m.x, t.label.y - m.y) * mpp) / MUSEUM_REACH[t.label.kind]!;
+      const r = (Math.hypot(t.x - m.x, t.y - m.y) * mpp) / MUSEUM_REACH[t.kind]!;
       if (r < best) [home, best] = [t, r];
     }
-    if (home) (home.museums ??= []).push(m);
+    if (!home) continue;
+    if (!collections.has(home)) collections.set(home, []);
+    collections.get(home)!.push(m);
   }
-  for (const t of towns) t.museums?.sort((a, b) => a.rank - b.rank);
+  for (const list of collections.values()) list.sort((a, b) => a.rank - b.rank);
+  return collections;
 }
 
-/** `mpp`: ground metres per scene pixel, for gathering museums into towns. */
+/**
+ * `mpp`: ground metres per scene pixel, for gathering museums into towns.
+ * `zoom`: the scene's; wide views show museums only on their towns' dots.
+ */
 export function buildFeatures(
   ctx: CanvasRenderingContext2D,
   tiles: TileFeatures[],
@@ -194,10 +213,12 @@ export function buildFeatures(
   width: number,
   height: number,
   mpp: number,
+  zoom: number,
   keep: Set<string> = new Set(),
 ): Features {
-  const placed = placeLabels(ctx, labels, width, height, keep);
-  gatherMuseums(placed, labels, mpp);
+  const collections = gatherMuseums(labels, mpp);
+  const shown = zoom >= MUSEUM_ICON_ZOOM ? labels : labels.filter((l) => l.kind !== 'museum');
+  const placed = placeLabels(ctx, shown, width, height, keep, collections);
   return {
     tiles: tiles.map((t) => ({
       ox: t.ox,
@@ -302,15 +323,17 @@ export function drawLines(ctx: CanvasRenderingContext2D, f: Features, v: View) {
 }
 
 /**
- * A settlement with museums keeps one tucked behind its dot: the icon at
- * about the dot's size, peeking out to the right like a card behind a token.
+ * A settlement with museums keeps one tucked behind its dot, up and to the
+ * right and a little askew: a sticky note behind a token.
  */
 function tuckMuseum(ctx: CanvasRenderingContext2D, dot: number) {
   museumPath ??= new Path2D(MUSEUM_ICON);
-  const k = (dot * 2 + 4) / 16;
+  const k = (BADGE_HALF(dot) * 2) / 16;
   ctx.save();
   ctx.globalAlpha = 1;
-  ctx.translate(dot + 1.5, 0.5);
+  const at = badgeOffset(dot);
+  ctx.translate(at.x, at.y);
+  ctx.rotate(BADGE_TILT);
   ctx.scale(k, k);
   ctx.translate(-8, -8);
   ctx.fillStyle = INK.border;
