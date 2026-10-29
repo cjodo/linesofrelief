@@ -1,5 +1,5 @@
 import { INK } from './config';
-import { DOT } from './features';
+import { DOT, MUSEUM_ICON } from './features';
 import { ramp } from './render';
 
 const fmt = new Intl.NumberFormat('en-US');
@@ -55,6 +55,9 @@ export function createLegend(root: HTMLElement) {
       <div><dt><svg viewBox="0 0 28 10">
           <path d="M14 1.5L18 8.5H10Z" fill="${INK.text}"/>
         </svg></dt><dd>summit</dd></div>
+      <div><dt><svg viewBox="0 0 28 10">
+          <path transform="translate(9.5 .5) scale(.75)" d="${MUSEUM_ICON}" fill="${INK.border}"/>
+        </svg></dt><dd>museum</dd></div>
     </dl>
     </div>`;
 

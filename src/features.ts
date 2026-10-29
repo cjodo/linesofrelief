@@ -65,8 +65,20 @@ const STYLE: Record<LabelKind, LabelStyle> = {
   water: { font: `italic 400 15px ${SERIF}`, color: INK.shore, spacing: 1.2, upper: false, order: 2, gap: 24 },
   town: { font: `400 9.5px ${MONO}`, color: INK.subtle, spacing: 2.4, upper: true, order: 3, gap: 16 },
   village: { font: `400 9px ${MONO}`, color: INK.muted, spacing: 2, upper: true, order: 4, gap: 12 },
+  // An icon, no name: placed last, so it never crowds out a name.
+  museum: { font: `400 9px ${MONO}`, color: INK.border, spacing: 0, upper: false, order: 5, gap: 6 },
 };
 const ELE_FONT = `400 9px ${MONO}`;
+
+/**
+ * Museum: a temple front (pediment, three columns, plinth) on a 12×12 grid,
+ * centred on 6,6. Shared with the legend's <svg>.
+ */
+export const MUSEUM_ICON =
+  'M6 .5 11.5 3.5H.5ZM1.5 4.5h2v5h-2ZM5 4.5h2v5H5ZM8.5 4.5h2v5h-2ZM.5 10h11v1.5H.5Z';
+let museumPath: Path2D | null = null;
+/** Half the icon's size, for its placement box. */
+const MUSEUM_HALF = 7;
 
 /** Settlement dot radius; names sit just above the dot. */
 export const DOT: Partial<Record<LabelKind, number>> = { city: 3, town: 2.2, village: 1.6 };
@@ -119,7 +131,9 @@ function placeLabels(
     let width = ctx.measureText(text).width;
     // Extent around the anchor at text size 1, then scaled with the text.
     let local: [number, number, number, number];
-    if (label.kind === 'peak') {
+    if (label.kind === 'museum') {
+      local = [-MUSEUM_HALF, -MUSEUM_HALF, MUSEUM_HALF, MUSEUM_HALF];
+    } else if (label.kind === 'peak') {
       setStyle(ctx, ELE_FONT, 1.5);
       width = Math.max(width, ctx.measureText(`${fmt.format(label.ele!)} m`).width);
       local = [-width / 2, -6, width / 2, 34];
@@ -279,7 +293,14 @@ export function drawLabels(ctx: CanvasRenderingContext2D, f: Features, v: View) 
     ctx.fillStyle = s.color;
     setStyle(ctx, s.font, s.spacing);
     const dot = DOT[label.kind];
-    if (dot) {
+    if (label.kind === 'museum') {
+      museumPath ??= new Path2D(MUSEUM_ICON);
+      ctx.globalAlpha = 1;
+      ctx.translate(-6, -6);
+      ctx.lineWidth = 2.5;
+      ctx.stroke(museumPath);
+      ctx.fill(museumPath);
+    } else if (dot) {
       ctx.beginPath();
       ctx.arc(0, 0, dot, 0, Math.PI * 2);
       ctx.lineWidth = 2.5;

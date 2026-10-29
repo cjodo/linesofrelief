@@ -2,9 +2,11 @@ import {
   CACHE_NAME,
   MAX_CONCURRENT,
   MEMORY_TILES,
+  MUSEUM_MIN_ZOOM,
   PERSISTENT_TILES,
   TILE,
   STALE_CACHES,
+  museumUrl,
   terrainUrl,
   vectorUrl,
 } from './config';
@@ -190,7 +192,7 @@ export interface Geometry {
   parts: Uint32Array;
 }
 
-export type LabelKind = 'city' | 'peak' | 'water' | 'town' | 'village';
+export type LabelKind = 'city' | 'peak' | 'water' | 'town' | 'village' | 'museum';
 
 export interface Label {
   kind: LabelKind;
@@ -236,6 +238,13 @@ const emptyVector: VectorData = {
 };
 
 const LAKE_CLASSES = new Set(['lake', 'pond', 'river']);
+
+const nameOf = (p: Record<string, unknown>) =>
+  // The first name the bundled faces can set (tiles often carry an empty
+  // or mixed-script name:latin); none at all drops the label.
+  [p['name:latin'], p['name:en'], p.name].find(
+    (n): n is string => typeof n === 'string' && settable(n),
+  );
 const PLACE_KINDS: Record<string, LabelKind> = { city: 'city', town: 'town', village: 'village' };
 
 export function decodeVector(buf: ArrayBuffer): VectorData {
@@ -252,12 +261,6 @@ export function decodeVector(buf: ArrayBuffer): VectorData {
     const scale = TILE / layer.extent;
     for (const f of layer.features) fn(f, scale);
   };
-  const nameOf = (p: Record<string, unknown>) =>
-    // The first name the bundled faces can set (tiles often carry an empty
-    // or mixed-script name:latin); none at all drops the label.
-    [p['name:latin'], p['name:en'], p.name].find(
-      (n): n is string => typeof n === 'string' && settable(n),
-    );
 
   each('water', (f, s) => {
     const cls = f.properties.class as string;
@@ -298,6 +301,40 @@ export function decodeVector(buf: ArrayBuffer): VectorData {
   });
 
   return { ocean: ocean.build(), lake: lake.build(), river: river.build(), border: border.build(), labels };
+}
+
+/** The server's museums for tile (z, x, y), as labels in that tile's pixels. */
+export function decodeMuseums(json: unknown, z: number, x: number, y: number): Label[] {
+  if (!Array.isArray(json)) return [];
+  return json.flatMap((m: Record<string, unknown>): Label[] => {
+    const name = nameOf(m);
+    if (!name || typeof m.lat !== 'number' || typeof m.lon !== 'number') return [];
+    const p = lonLatToWorld(m.lon, m.lat, z);
+    return [{ kind: 'museum', name, x: p.x - x * TILE, y: p.y - y * TILE, rank: Number(m.rank ?? 99) }];
+  });
+}
+
+/** A tile's map data with its museums added (the cached copy is left as is). */
+export const withMuseums = (v: VectorData, museums: Label[]): VectorData =>
+  museums.length ? { ...v, labels: [...v.labels, ...museums] } : v;
+
+const museums = new Map<string, Promise<Label[]>>();
+
+/** Museums in a map tile, in tile pixels; none at wide zooms. Never rejects. */
+export function loadMuseums(z: number, x: number, y: number, group?: Group): Promise<Label[]> {
+  const t = z >= MUSEUM_MIN_ZOOM ? normalize(z, x, y) : null;
+  if (!t) return Promise.resolve([]);
+  const url = museumUrl(z, t.x, t.y);
+  if (group) wanted[group].add(url);
+  return memoize(
+    museums,
+    url,
+    async () => {
+      const res = await fetchCached(url, 'application/json', group);
+      return res ? decodeMuseums(await res.json(), z, t.x, t.y) : [];
+    },
+    [],
+  );
 }
 
 const vectors = new Map<string, Promise<VectorData>>();

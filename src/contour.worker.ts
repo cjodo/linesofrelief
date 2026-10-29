@@ -2,11 +2,13 @@ import { TILE } from './config';
 import { buildRegion, type Kernel, type SceneRequest } from './scene-build';
 import {
   loadElevation,
+  loadMuseums,
   loadVector,
   startGroup,
   worldToLonLat,
   type Geometry,
   type Label,
+  withMuseums,
 } from './tiles';
 import wasmUrl from './wasm/contour.wasm?url';
 
@@ -136,7 +138,10 @@ self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest>) => {
     kernel,
     {
       elevation: (z, x, y) => loadElevation(z, x, y, group),
-      vector: (z, x, y) => loadVector(z, x, y, group),
+      vector: (z, x, y) =>
+        Promise.all([loadVector(z, x, y, group), loadMuseums(z, x, y, group)]).then(([v, m]) =>
+          withMuseums(v, m),
+        ),
     },
     (done, total) =>
       self.postMessage({ type: 'progress', id: msg.id, done, total } satisfies SceneProgress),

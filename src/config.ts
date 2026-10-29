@@ -81,6 +81,11 @@ export const terrainUrl = (z: number, x: number, y: number) =>
 export const vectorUrl = (z: number, x: number, y: number) =>
   `/tiles/vector/${z}/${x}/${y}.pbf?v=${TILE_VERSION}`;
 export const SEARCH_URL = '/api/search';
+/** Museums per map tile, read by the server from deeper tiles (crates/server). */
+export const museumUrl = (z: number, x: number, y: number) =>
+  `/api/museums/${z}/${x}/${y}.json?v=${TILE_VERSION}`;
+/** Map-tile zooms that carry museums: view zooms 11 and up (see DETAIL). */
+export const MUSEUM_MIN_ZOOM = 12;
 
 // Caching: tiles are effectively immutable, so they're kept as long as storage allows.
 export const CACHE_NAME = 'tiles-v3';
