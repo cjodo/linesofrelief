@@ -579,6 +579,7 @@ ${analyticsHtml()}
       <nav class="nav" aria-label="Site">
         <a class="brand" href="/">Topography</a>
         <a href="/mountains/"${current === 'summits' ? ' aria-current="page"' : ''}>Summits</a>
+        <a href="/landmarks/"${current === 'landmarks' ? ' aria-current="page"' : ''}>Landmarks</a>
         <a href="/why/"${current === 'why' ? ' aria-current="page"' : ''}>Why</a>
         ${favoritesNav()}
         ${map ? `<a href="${esc(map.href)}">Live map</a>` : ''}
@@ -587,6 +588,7 @@ ${body}
       <footer>
         <a href="/">Search the whole world →</a>
         <a href="/mountains/">All summits</a>
+        <a href="/landmarks/">All landmarks</a>
         <a href="/why/">Why this map</a>
         ${map ? `<a href="${esc(map.href)}">${esc(map.name)} on the live map</a>` : ''}
         <a href="#" class="consent-link" data-consent>Cookies</a>
