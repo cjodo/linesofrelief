@@ -1,4 +1,4 @@
-import { INDEX_EVERY, RAMP, RAMP_STEP } from './config';
+import { INDEX_EVERY, RAMP, RAMP_STEP, RELIEF_BELOW } from './config';
 import type { SceneResult } from './contour.worker';
 import { drawLabels, drawLines, drawWater, toPath, type Features } from './features';
 
@@ -51,6 +51,8 @@ export interface Line {
   path: Path2D;
   color: string;
   major: boolean;
+  /** Position on the colour ramp, 0 (lowest) to 1 (highest). */
+  t: number;
 }
 
 export interface Scene {
@@ -100,11 +102,10 @@ export function buildScene(
     ds,
     lo,
     hi,
-    lines: r.levels.map((c) => ({
-      path: toPath(c.coords, c.parts),
-      color: ramp((c.value - lo) / (hi - lo)),
-      major: c.value % major === 0,
-    })),
+    lines: r.levels.map((c) => {
+      const t = Math.min(1, Math.max(0, (c.value - lo) / (hi - lo)));
+      return { path: toPath(c.coords, c.parts), color: ramp(t), major: c.value % major === 0, t };
+    }),
     features,
   };
 }
@@ -121,11 +122,15 @@ function drawContours(ctx: CanvasRenderingContext2D, scene: Scene, scale: number
   ctx.lineJoin = 'round';
   // Minor lines first so index lines sit on top.
   for (const pass of [false, true]) {
-    ctx.globalAlpha = pass ? 0.95 : 0.45;
+    const alpha = pass ? 0.95 : 0.45;
     // Line weights are in screen pixels whatever the scene's resolution.
-    ctx.lineWidth = (pass ? 1.25 : 0.6) / (ds * scale);
+    const width = (pass ? 1.25 : 0.6) / (ds * scale);
+    // Wide views: lowlands recede, high ground glows and thickens a touch.
+    const relief = scene.zoom <= RELIEF_BELOW;
     for (const line of scene.lines) {
       if (line.major !== pass) continue;
+      ctx.globalAlpha = relief ? alpha * (0.3 + 0.9 * line.t) : alpha;
+      ctx.lineWidth = relief ? width * (0.8 + 0.7 * line.t) : width;
       ctx.strokeStyle = line.color;
       ctx.stroke(line.path);
     }

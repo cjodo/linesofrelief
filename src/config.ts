@@ -28,7 +28,8 @@ export const DETAIL: Record<number, { ds: number; vectorDrop: number }> = {
   11: { ds: 2, vectorDrop: 1 },
   10: { ds: 4, vectorDrop: 1 },
   9: { ds: 4, vectorDrop: 2 },
-  8: { ds: 8, vectorDrop: 2 },
+  // Wide views keep enough elevation detail for ranges to read as ranges.
+  8: { ds: 4, vectorDrop: 2 },
 };
 
 /**
@@ -37,8 +38,13 @@ export const DETAIL: Record<number, { ds: number; vectorDrop: number }> = {
  * coarse elevation behind the widest views smooths summits, so strict
  * doubling would leave them nearly bare.
  */
-export const INTERVALS: Record<number, number> = { 8: 300, 9: 250, 10: 200, 11: 100, 12: 50, 13: 25 };
+export const INTERVALS: Record<number, number> = { 8: 200, 9: 150, 10: 100, 11: 100, 12: 50, 13: 25 };
 export const INDEX_EVERY = 5;
+/**
+ * At and below this zoom, contour lines brighten with altitude (relief
+ * emphasis), so mountain ranges stand out from the lowlands at a glance.
+ */
+export const RELIEF_BELOW = 10;
 /** The colour ramp's ends snap to this, at every zoom (fine enough for wide views). */
 export const RAMP_STEP = 250;
 

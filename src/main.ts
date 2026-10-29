@@ -15,6 +15,8 @@ import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
 import { track } from './analytics';
 import { greet } from './banner';
+import { PEAKS } from '../site/peaks';
+import type { Label } from './tiles';
 import { bundleUrl, decodeScene, favoriteFor, favoriteRequest } from './bundle';
 import type { Favorite } from '../site/favorites';
 import { createExport } from './export';
@@ -586,6 +588,23 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   await acceptScene(msg);
 };
 
+/** Wide views: the map tiles name few peaks, so add the famous summits. */
+const SUMMITS_BELOW = 11;
+function withSummits(r: SceneResult): Label[] {
+  if (r.z > SUMMITS_BELOW) return r.labels;
+  const extra: Label[] = [];
+  for (const p of PEAKS) {
+    const { x, y } = lonLatToWorld(p.lon, p.lat, r.z);
+    const lx = x - r.originX;
+    const ly = y - r.originY;
+    if (lx < 0 || ly < 0 || lx > r.width || ly > r.height) continue;
+    // Already named by the tiles (within ~30 px): keep theirs.
+    if (r.labels.some((l) => l.kind === 'peak' && Math.hypot(l.x - lx, l.y - ly) < 30)) continue;
+    extra.push({ kind: 'peak', name: p.name, x: lx, y: ly, rank: -p.ele, ele: p.ele });
+  }
+  return extra.length ? [...r.labels, ...extra] : r.labels;
+}
+
 /** A detailed scene is ready (from the worker, or a pre-built favourite). */
 async function acceptScene(msg: SceneResult) {
   await fontsReady;
@@ -594,7 +613,7 @@ async function acceptScene(msg: SceneResult) {
   pending = null;
   document.body.classList.remove('busy');
   const keep = new Set(scene?.features.labels.map((p) => labelKey(p.label)));
-  const features = buildFeatures(ctx, msg.tiles, msg.labels, msg.width, msg.height, keep);
+  const features = buildFeatures(ctx, msg.tiles, withSummits(msg), msg.width, msg.height, keep);
   lastScene = msg;
   // One colour scale per arrival; re-fit only on reaching wholly new terrain.
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
