@@ -3,13 +3,24 @@ import { INK, MONO } from './config';
 import { lonLatToWorld } from './tiles';
 
 /**
- * Famous buildings on the map: a small diamond in love at each, its name
- * beside it. A click goes to the landmark's page and its render. Drawn over
- * the scene in screen space, so they're there at every scale.
+ * Famous buildings on the map: a small green tower at each, its name beside
+ * it. A click goes to the landmark's page and its render. Drawn over the
+ * scene in screen space, so they're there at every scale.
  */
 
-/** The diamond's half-diagonal, screen px at text size 1. */
-const HALF = 5.5;
+/**
+ * The glyph: a tower on a 16×16 grid, centred on 8,8: spire, shaft, a
+ * platform, and four legs spread over an arch.
+ */
+export const LANDMARK_ICON =
+  'M8 .5 9 4.2H7Z' +
+  'M6.9 4.8H9.1L10.1 8.6H5.9Z' +
+  'M4.8 9.2H11.2V10.4H4.8Z' +
+  'M5.3 11H10.7L12.9 15.5H10.3Q8 11.9 5.7 15.5H3.1Z';
+let iconPath: Path2D | null = null;
+/** The glyph's size on screen at text size 1, px, and its half. */
+const SIZE = 18;
+const HALF = SIZE / 2;
 /** Hovered, a badge grows a little (as town badges do). */
 const LIFT = 1.25;
 /** How far (screen px) from a badge's centre, or its name, still reaches it. */
@@ -50,18 +61,21 @@ export function drawLandmarks(ctx: CanvasRenderingContext2D, v: View) {
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(k, k);
-    ctx.beginPath();
-    ctx.moveTo(0, -HALF);
-    ctx.lineTo(HALF, 0);
-    ctx.lineTo(0, HALF);
-    ctx.lineTo(-HALF, 0);
-    ctx.closePath();
+    // The glyph, haloed in the page's colour so it reads over any contour.
+    iconPath ??= new Path2D(LANDMARK_ICON);
+    ctx.save();
+    ctx.scale(SIZE / 16, SIZE / 16);
+    ctx.translate(-8, -8);
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = INK.base;
-    ctx.stroke();
-    ctx.fillStyle = INK.border;
-    ctx.fill();
+    ctx.stroke(iconPath);
+    ctx.fillStyle = INK.landmark;
+    ctx.fill(iconPath);
+    ctx.restore();
+    // Its name in the same green, haloed like every label.
     ctx.lineWidth = 3.5;
+    ctx.strokeStyle = INK.base;
+    ctx.fillStyle = INK.landmark;
     ctx.strokeText(label(l), HALF + 6, 0);
     ctx.fillText(label(l), HALF + 6, 0);
     ctx.restore();

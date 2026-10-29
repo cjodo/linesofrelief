@@ -63,6 +63,8 @@ export const INK = {
   water: '#31748f',
   shore: '#9ccfd8',
   border: '#eb6f92',
+  /** Landmarks' glyphs: a green Rosé Pine doesn't have, soft enough to sit with it, apart from its teal water. */
+  landmark: '#8bd5a0',
 };
 
 export const SERIF = '"Instrument Serif", Georgia, serif';
