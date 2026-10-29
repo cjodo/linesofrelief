@@ -114,9 +114,14 @@ export function createCollection(
 
     root.classList.remove('open');
     position();
-    void root.offsetWidth; // start from closed
+    root.getBoundingClientRect(); // a layout here starts it from closed
     root.classList.add('open');
-    shown.forEach((m, i) => target.describe(m).then((info) => fill(target.key, i, info)));
+    for (const [i, m] of shown.entries()) {
+      target
+        .describe(m)
+        .then((info) => fill(target.key, i, info))
+        .catch(reportError);
+    }
   }
 
   /**

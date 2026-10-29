@@ -148,13 +148,15 @@ export function createMuseumCard(root: HTMLElement) {
       root.classList.remove('open');
       render(spot, undefined);
       place();
-      void root.offsetWidth; // start the entrance from closed
+      root.getBoundingClientRect(); // a layout here starts the entrance from closed
       root.classList.add('open');
-      museumInfo(spot).then((info) => {
-        if (openFor !== spot) return; // closed, or another museum since
-        render(spot, info);
-        place();
-      });
+      museumInfo(spot)
+        .then((info) => {
+          if (openFor !== spot) return; // closed, or another museum since
+          render(spot, info);
+          place();
+        })
+        .catch(reportError);
     },
     hide,
     get open() {

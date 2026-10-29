@@ -35,11 +35,13 @@ export function createPeek(root: HTMLElement) {
         place();
         root.classList.add('open');
         if (ready !== undefined) return;
-        info.then((i) => {
-          if (showing !== target.key) return;
-          renderMuseum(root, target.spot, i, { compact: true });
-          place();
-        });
+        info
+          .then((i) => {
+            if (showing !== target.key) return;
+            renderMuseum(root, target.spot, i, { compact: true });
+            place();
+          })
+          .catch(reportError);
       });
     },
     onClose: () => {

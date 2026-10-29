@@ -1050,7 +1050,7 @@ function hoverMuseum(hit: ReturnType<typeof museumAt>, at: { x: number; y: numbe
   const { label, scene: s } = hit;
   const [x, y] = [label.x + s.originX - (cx - w / 2), label.y + s.originY - (cy - h / 2)];
   const spot = museumSpot(label, hit.town, s);
-  museumInfo(spot);
+  museumInfo(spot).catch(reportError); // fetched ahead of a click
   const anchor: [number, number, number, number] = [x - ICON_HALF, y - ICON_HALF, x + ICON_HALF, y + ICON_HALF];
   peek.hover({ key: key!, spot, anchor, side: 'above' }, at);
 }

@@ -191,7 +191,7 @@ async fn main() {
     let listener = bind(port).await;
     let port = listener.local_addr().expect("local addr").port();
     if let Ok(file) = std::env::var("PORT_FILE") {
-        std::fs::write(&file, port.to_string()).expect("write PORT_FILE");
+        tokio::fs::write(&file, port.to_string()).await.expect("write PORT_FILE");
     }
     println!("topography server on http://localhost:{port}");
     axum::serve(listener, router).await.expect("serve");
