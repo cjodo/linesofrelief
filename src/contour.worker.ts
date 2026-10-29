@@ -2,11 +2,14 @@ import { TILE } from './config';
 import { buildRegion, type Kernel, type SceneRequest } from './scene-build';
 import {
   loadElevation,
+  loadMuseums,
   loadVector,
   startGroup,
   worldToLonLat,
   type Geometry,
   type Label,
+  type VectorData,
+  withMuseums,
 } from './tiles';
 import wasmUrl from './wasm/contour.wasm?url';
 
@@ -28,6 +31,40 @@ export interface NameResult {
   id: number;
   name: string | null;
   ele?: number;
+}
+
+/** Things the legend can find: label kinds, named lakes, and line features. */
+export type FindKind =
+  | 'city'
+  | 'town'
+  | 'village'
+  | 'peak'
+  | 'museum'
+  | 'lake'
+  | 'ocean'
+  | 'river'
+  | 'border';
+
+/** "Where is the nearest …?" from a point in world pixels at zoom `z`. */
+export interface NearestRequest {
+  type: 'nearest';
+  id: number;
+  kind: FindKind;
+  z: number;
+  x: number;
+  y: number;
+  /** Ignore anything closer than this (world px): it's already in view. */
+  min: number;
+  /** Names already visited: the next nearest instead. */
+  skip: string[];
+}
+
+export interface NearestResult {
+  type: 'nearest';
+  id: number;
+  kind: FindKind;
+  /** World px at the request's zoom; null when nothing is within reach. */
+  found: { x: number; y: number; name?: string; ele?: number } | null;
 }
 
 export interface SceneProgress {
@@ -121,10 +158,62 @@ async function nameAt({ id, z, x, y, oceanOnly }: NameRequest): Promise<NameResu
   return { type: 'named', id, name: place?.name ?? (await oceanName(z, x, y)) };
 }
 
-self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest>) => {
+/** Rings of tiles searched around the start: 9×9 tiles at most. */
+const NEAREST_RINGS = 4;
+const LINES = { ocean: 'ocean', river: 'river', border: 'border' } as const;
+
+/** Every point of `kind` in a tile: line vertices, or label anchors. */
+function eachOf(kind: FindKind, v: VectorData, visit: (x: number, y: number, l?: Label) => void) {
+  if (kind === 'ocean' || kind === 'river' || kind === 'border') {
+    const { coords } = v[LINES[kind]];
+    for (let i = 0; i < coords.length; i += 2) visit(coords[i], coords[i + 1]);
+    return;
+  }
+  for (const l of v.labels) {
+    if (kind === 'lake' ? l.kind === 'water' && l.cls === 'lake' : l.kind === kind) visit(l.x, l.y, l);
+  }
+}
+
+/**
+ * Search outward a ring of tiles at a time (the tiles the view loads, so
+ * mostly cached). After ring r everything within r tiles is covered, so a
+ * find that close is the nearest.
+ */
+async function nearest({ id, kind, z, x, y, min, skip }: NearestRequest): Promise<NearestResult> {
+  const skipped = new Set(skip);
+  const [cx, cy] = [Math.floor(x / TILE), Math.floor(y / TILE)];
+  const best: { d: number; found: NearestResult['found'] } = { d: Infinity, found: null };
+  for (let r = 0; r <= NEAREST_RINGS; r++) {
+    const ring: [number, number][] = [];
+    for (let ty = cy - r; ty <= cy + r; ty++) {
+      for (let tx = cx - r; tx <= cx + r; tx++) {
+        if (Math.max(Math.abs(tx - cx), Math.abs(ty - cy)) === r) ring.push([tx, ty]);
+      }
+    }
+    await Promise.all(
+      ring.map(async ([tx, ty]) => {
+        const [v, m] = await Promise.all([
+          loadVector(z, tx, ty),
+          kind === 'museum' ? loadMuseums(z, tx, ty) : [],
+        ]);
+        eachOf(kind, withMuseums(v, m), (lx, ly, l) => {
+          const [px, py] = [tx * TILE + lx, ty * TILE + ly];
+          const d = Math.hypot(px - x, py - y);
+          if (d < min || d >= best.d || (l && skipped.has(l.name))) return;
+          best.d = d;
+          best.found = { x: px, y: py, name: l?.name, ele: l?.ele };
+        });
+      }),
+    );
+    if (best.d <= r * TILE) break;
+  }
+  return { type: 'nearest', id, kind, found: best.found };
+}
+
+self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest | NearestRequest>) => {
   const msg = e.data;
   if ('type' in msg) {
-    self.postMessage(await nameAt(msg));
+    self.postMessage(msg.type === 'nearest' ? await nearest(msg) : await nameAt(msg));
     return;
   }
   // This request replaces the last of its kind: tiles queued only for that one
@@ -136,7 +225,10 @@ self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest>) => {
     kernel,
     {
       elevation: (z, x, y) => loadElevation(z, x, y, group),
-      vector: (z, x, y) => loadVector(z, x, y, group),
+      vector: (z, x, y) =>
+        Promise.all([loadVector(z, x, y, group), loadMuseums(z, x, y, group)]).then(([v, m]) =>
+          withMuseums(v, m),
+        ),
     },
     (done, total) =>
       self.postMessage({ type: 'progress', id: msg.id, done, total } satisfies SceneProgress),

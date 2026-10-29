@@ -4,8 +4,12 @@
 //!
 //! Env: PORT (8080), REDIS_URL (redis://127.0.0.1:6379), STATIC_DIR (dist),
 //! PORT_FILE (optional: the port actually bound is written there).
+//! Museums are read out of OpenFreeMap's z14 tiles here, since the zooms the
+//! map shows carry none.
 //! If PORT is taken, the next free port is used. Without Redis it still
 //! works, as a plain proxy.
+
+mod mvt;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -37,6 +41,9 @@ const SEARCH_TAGS: [&str; 8] = [
     "water:lake",
     "water:reservoir",
 ];
+
+/// OpenFreeMap's POI layer has museums from this zoom on.
+const MUSEUM_SOURCE_ZOOM: u32 = 14;
 
 const DAY: u64 = 86_400;
 /// Redis is a cache: never let a missing or slow one hold up startup or a request.
@@ -74,6 +81,13 @@ const SEARCH_POLICY: Policy = Policy {
 const REVERSE_POLICY: Policy = Policy {
     redis_ttl: 30 * DAY,
     cache_control: "public, max-age=86400",
+    content_type: "application/json",
+};
+
+/// Museums come from the map tiles, so they keep as long as those do.
+const MUSEUM_POLICY: Policy = Policy {
+    redis_ttl: 7 * DAY,
+    cache_control: "public, max-age=604800",
     content_type: "application/json",
 };
 
@@ -129,6 +143,7 @@ async fn main() {
         .route("/tiles/vector/{z}/{x}/{file}", get(vector))
         .route("/api/search", get(search))
         .route("/api/reverse", get(reverse))
+        .route("/api/museums/{z}/{x}/{file}", get(museums))
         .with_state(app)
         .fallback_service(ServeDir::new(static_dir))
         .layer(middleware::from_fn(browser_cache))
@@ -180,25 +195,84 @@ async fn vector(State(app): State<Shared>, Path((z, x, file)): Path<(u32, u32, S
     };
     // Keyed without the data version, so a weekly release doesn't empty the cache.
     let key = format!("vector:{z}/{x}/{y}");
-    let app2 = app.clone();
-    cached(&app, &key, &VECTOR_POLICY, || async move {
-        let template = app2
-            .vector_template
-            .get_or_try_init(|| async {
-                #[derive(Deserialize)]
-                struct TileJson {
-                    tiles: Vec<String>,
+    cached(&app, &key, &VECTOR_POLICY, || vector_url(&app, z, x, y)).await
+}
+
+/// OpenFreeMap's URL for a tile in its current weekly release.
+async fn vector_url(app: &App, z: u32, x: u32, y: u32) -> Result<String, BoxError> {
+    let template = app
+        .vector_template
+        .get_or_try_init(|| async {
+            #[derive(Deserialize)]
+            struct TileJson {
+                tiles: Vec<String>,
+            }
+            let tj: TileJson = app.http.get(VECTOR_TILEJSON).send().await?.json().await?;
+            tj.tiles.into_iter().next().ok_or_else(|| BoxError::from("empty tilejson"))
+        })
+        .await?;
+    Ok(template
+        .replace("{z}", &z.to_string())
+        .replace("{x}", &x.to_string())
+        .replace("{y}", &y.to_string()))
+}
+
+/// Museums in a map tile, at the zooms the map shows them: a JSON array of
+/// `{ name, name:en?, name:latin?, rank?, lat, lon }`.
+async fn museums(State(app): State<Shared>, Path((z, x, file)): Path<(u32, u32, String)>) -> Response {
+    let Some((z, x, y)) = tile(z, x, &file, ".json").filter(|(z, ..)| (12..=13).contains(z)) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let key = format!("museums:v1:{z}/{x}/{y}");
+    cached_body(&app, &key, &MUSEUM_POLICY, || museums_in(&app, z, x, y)).await
+}
+
+/// Read the museums out of every z14 tile under (z, x, y). The big source
+/// tiles aren't kept; the small answer is. Any failed tile fails the answer,
+/// so a partial list is never cached. The fields are the OpenMapTiles poi
+/// layer's (https://openmaptiles.org/schema/#poi); README "Server API" has
+/// the response.
+async fn museums_in(app: &Shared, z: u32, x: u32, y: u32) -> Result<Vec<u8>, BoxError> {
+    let k = 1 << (MUSEUM_SOURCE_ZOOM - z);
+    let mut tiles = tokio::task::JoinSet::new();
+    for n in 0..k * k {
+        let (tx, ty) = (x * k + n % k, y * k + n / k);
+        let app = app.clone();
+        tiles.spawn(async move {
+            let url = vector_url(&app, MUSEUM_SOURCE_ZOOM, tx, ty).await?;
+            Ok::<_, BoxError>((tx, ty, fetch(&app, &url).await?))
+        });
+    }
+    let mut out = Vec::new();
+    while let Some(done) = tiles.join_next().await {
+        let (tx, ty, body) = done??;
+        let Some(layer) = mvt::points(&body, "poi") else { continue };
+        let extent = i64::from(layer.extent);
+        for p in layer.points {
+            // Points in the buffer belong to (and are listed by) a neighbour.
+            let inside = (0..extent).contains(&p.x) && (0..extent).contains(&p.y);
+            if !inside || p.properties.get("class").and_then(|c| c.as_str()) != Some("museum") {
+                continue;
+            }
+            let mut museum = serde_json::Map::new();
+            for key in ["name", "name:en", "name:latin", "rank"] {
+                if let Some(v) = p.properties.get(key) {
+                    museum.insert(key.into(), v.clone());
                 }
-                let tj: TileJson = app2.http.get(VECTOR_TILEJSON).send().await?.json().await?;
-                tj.tiles.into_iter().next().ok_or_else(|| BoxError::from("empty tilejson"))
-            })
-            .await?;
-        Ok(template
-            .replace("{z}", &z.to_string())
-            .replace("{x}", &x.to_string())
-            .replace("{y}", &y.to_string()))
-    })
-    .await
+            }
+            if !museum.contains_key("name") {
+                continue;
+            }
+            let fx = f64::from(tx) + p.x as f64 / extent as f64;
+            let fy = f64::from(ty) + p.y as f64 / extent as f64;
+            let (lat, lon) = lat_lon(MUSEUM_SOURCE_ZOOM, fx, fy);
+            // ~10 cm: plenty, and keeps the answer small.
+            museum.insert("lat".into(), ((lat * 1e6).round() / 1e6).into());
+            museum.insert("lon".into(), ((lon * 1e6).round() / 1e6).into());
+            out.push(serde_json::Value::Object(museum));
+        }
+    }
+    Ok(serde_json::to_vec(&out)?)
 }
 
 #[derive(Deserialize)]
@@ -293,6 +367,20 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<String, BoxError>>,
 {
+    cached_body(app, key, policy, || async { fetch(app, &upstream().await?).await }).await
+}
+
+async fn fetch(app: &App, url: &str) -> Result<Vec<u8>, BoxError> {
+    let res = app.http.get(url).send().await?.error_for_status()?;
+    Ok(res.bytes().await?.to_vec())
+}
+
+/// Serve `key` from Redis, or make the body once and store it.
+async fn cached_body<F, Fut>(app: &App, key: &str, policy: &Policy, make: F) -> Response
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, BoxError>>,
+{
     if let Some(mut redis) = app.redis.clone() {
         let get = tokio::time::timeout(REDIS_OP, redis.get::<_, Option<Vec<u8>>>(key));
         if let Ok(Ok(Some(body))) = get.await {
@@ -300,14 +388,7 @@ where
         }
     }
 
-    let fetched = async {
-        let url = upstream().await?;
-        let res = app.http.get(url).send().await?.error_for_status()?;
-        Ok::<_, BoxError>(res.bytes().await?.to_vec())
-    }
-    .await;
-
-    match fetched {
+    match make().await {
         Ok(body) => {
             if let Some(mut redis) = app.redis.clone() {
                 // Empty answers (no search hits, nothing nearby) are cheap to
@@ -343,4 +424,11 @@ fn tile(z: u32, x: u32, file: &str, ext: &str) -> Option<(u32, u32, u32)> {
     let y: u32 = file.strip_suffix(ext)?.parse().ok()?;
     let n = 1u32.checked_shl(z).filter(|_| z <= 15)?;
     (x < n && y < n).then_some((z, x, y))
+}
+
+/// Degrees at a fractional tile position at zoom `z`.
+fn lat_lon(z: u32, x: f64, y: f64) -> (f64, f64) {
+    let n = f64::from(1u32 << z);
+    let lat = (std::f64::consts::PI * (1.0 - 2.0 * y / n)).sinh().atan().to_degrees();
+    (lat, x / n * 360.0 - 180.0)
 }

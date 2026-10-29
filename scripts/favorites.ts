@@ -11,9 +11,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { brotliCompressSync } from 'node:zlib';
 import { FAVORITES } from '../site/favorites';
 import { encodeScene, favoriteRequest } from '../src/bundle';
-import { terrainUrl, vectorUrl } from '../src/config';
+import { MUSEUM_MIN_ZOOM, museumUrl, terrainUrl, vectorUrl } from '../src/config';
 import { buildRegion, type Kernel } from '../src/scene-build';
-import { decodeVector, terrariumToElevation } from '../src/tiles';
+import { decodeMuseums, decodeVector, terrariumToElevation, withMuseums } from '../src/tiles';
 import { decodePng } from './png';
 
 const BASE = process.env.BASE ?? 'http://localhost:8080';
@@ -33,7 +33,10 @@ const loaders = {
     return terrariumToElevation(png.pixels, png.channels);
   },
   async vector(z: number, x: number, y: number) {
-    return decodeVector(await get(vectorUrl(z, x, y), 'application/x-protobuf'));
+    const vector = decodeVector(await get(vectorUrl(z, x, y), 'application/x-protobuf'));
+    if (z < MUSEUM_MIN_ZOOM) return vector;
+    const json = JSON.parse(new TextDecoder().decode(await get(museumUrl(z, x, y), 'application/json')));
+    return withMuseums(vector, decodeMuseums(json, z, x, y));
   },
 };
 

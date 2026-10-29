@@ -1,16 +1,38 @@
-import { DEFAULT_ZOOM, DETAIL, INTERVALS, MONO, SERIF, START, TILE, ZOOMS } from './config';
+import {
+  DEFAULT_ZOOM,
+  DETAIL,
+  INTERVALS,
+  MONO,
+  MUSEUM_MIN_ZOOM,
+  SERIF,
+  START,
+  TILE,
+  ZOOMS,
+} from './config';
 import type {
+  FindKind,
   NameRequest,
   NameResult,
+  NearestRequest,
+  NearestResult,
   SceneProgress,
   SceneRequest,
   SceneResult,
 } from './contour.worker';
 import { ATLAS_ZOOM, Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
-import { buildFeatures, labelKey, setLabelScale, type Features } from './features';
+import {
+  badgeOffset,
+  buildFeatures,
+  DOT,
+  labelKey,
+  setLabelScale,
+  type Features,
+  type PlacedLabel,
+} from './features';
 import { createMinimap } from './minimap';
 import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
+import { createCollection } from './collection';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
 import { track } from './analytics';
@@ -45,7 +67,9 @@ const ctx = canvas.getContext('2d')!;
 const previewCanvas = document.querySelector<HTMLCanvasElement>('#preview')!;
 const pctx = previewCanvas.getContext('2d')!;
 const readout = document.querySelector<HTMLElement>('#coords')!;
-const updateLegend = createLegend(document.querySelector<HTMLElement>('#legend')!);
+const updateLegend = createLegend(document.querySelector<HTMLElement>('#legend')!, (kind) =>
+  findNearest(kind),
+);
 const intro = document.querySelector<HTMLElement>('#intro')!;
 const introStatus = intro.querySelector<HTMLElement>('.status')!;
 const introFill = intro.querySelector<HTMLElement>('.fill')!;
@@ -331,6 +355,8 @@ function arrive(
   place: Spot & { kind?: string; context?: string },
   { push = false, announce = false, keepZoom = false } = {},
 ) {
+  stopGlide();
+  collection.hide();
   // A link's zoom wins; a search keeps the reader's; otherwise the default.
   zoom = place.zoom ?? (keepZoom ? zoom : DEFAULT_ZOOM);
   updateZoomControls();
@@ -569,9 +595,12 @@ function showRegion(text: string, card?: { eyebrow: string; name: string; detail
   playCard(card);
 }
 
-worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResult>) => {
+worker.onmessage = async (
+  e: MessageEvent<SceneResult | SceneProgress | NameResult | NearestResult>,
+) => {
   const msg = e.data;
   if (msg.type === 'named') return msg.id === regionId ? regionNamed(msg) : named(msg);
+  if (msg.type === 'nearest') return foundNearest(msg);
   if (msg.id === previewId) {
     if (msg.type === 'scene' && !scene) {
       preview = buildScene(msg, emptyFeatures, msg.ds);
@@ -587,6 +616,99 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   }
   await acceptScene(msg);
 };
+
+// --- Legend: go to the nearest … -----------------------------------------------
+
+const FIND_NOUN: Record<FindKind, string> = {
+  city: 'city',
+  town: 'town',
+  village: 'village',
+  peak: 'summit',
+  museum: 'museum',
+  lake: 'lake',
+  ocean: 'coast',
+  river: 'river',
+  border: 'border',
+};
+/** Anything this close to the centre (screen px) is already here: find the next. */
+const FIND_CLEAR_PX = 24;
+/** Nearer than this many screens, glide there; farther, arrive as a search does. */
+const GLIDE_SCREENS = 2;
+const GLIDE_MS = 800;
+/** The widest view that draws museums (their tiles start at MUSEUM_MIN_ZOOM). */
+const MUSEUM_VIEW_ZOOM = ZOOMS.find((z) => z - DETAIL[z].vectorDrop >= MUSEUM_MIN_ZOOM)!;
+/** Named finds already visited, per kind: clicking again goes to the next nearest. */
+const visited = new Map<FindKind, Set<string>>();
+let nearestId = 0;
+
+function findNearest(kind: FindKind) {
+  // Search the map tiles this view loads (museums: the zoom that has them).
+  const vz = Math.max(zoom - DETAIL[zoom].vectorDrop, kind === 'museum' ? MUSEUM_MIN_ZOOM : 0);
+  const f = 2 ** (vz - zoom);
+  const req: NearestRequest = {
+    type: 'nearest',
+    id: ++nearestId,
+    kind,
+    z: vz,
+    x: cx * f,
+    y: cy * f,
+    min: FIND_CLEAR_PX * f,
+    skip: [...(visited.get(kind) ?? [])],
+  };
+  worker.postMessage(req);
+  track('legend_find', { kind });
+}
+
+function foundNearest({ id, kind, found }: NearestResult) {
+  if (id !== nearestId) return;
+  const noun = FIND_NOUN[kind];
+  if (!found) {
+    playCard({ eyebrow: 'Nothing nearby', name: `No ${noun} within reach` });
+    return;
+  }
+  if (found.name) {
+    if (!visited.has(kind)) visited.set(kind, new Set());
+    visited.get(kind)!.add(found.name);
+  }
+  const vz = Math.max(zoom - DETAIL[zoom].vectorDrop, kind === 'museum' ? MUSEUM_MIN_ZOOM : 0);
+  const f = 2 ** (zoom - vz);
+  const [tx, ty] = [found.x * f, found.y * f];
+  const km = (Math.hypot(tx - cx, ty - cy) * metresPerPx()) / 1000;
+  const detail = [
+    found.ele !== undefined ? `${fmt.format(found.ele)} m` : '',
+    `${km < 10 ? km.toFixed(1) : fmt.format(Math.round(km))} km away`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const near = Math.hypot(tx - cx, ty - cy) < GLIDE_SCREENS * Math.max(w, h);
+  if (near && (kind !== 'museum' || zoom >= MUSEUM_VIEW_ZOOM)) {
+    glideTo(tx, ty, () => {
+      if (found.name) playCard({ eyebrow: `Nearest ${noun}`, name: found.name, detail });
+    });
+    return;
+  }
+  const { lat, lon } = worldToLonLat(tx, ty, zoom);
+  const z = kind === 'museum' ? Math.max(zoom, MUSEUM_VIEW_ZOOM) : zoom;
+  arrive({ name: found.name, lat, lon, zoom: z, detail: `Nearest ${noun} · ${detail}` }, { push: true });
+}
+
+let glideFrame = 0;
+const stopGlide = () => cancelAnimationFrame(glideFrame);
+
+/** Pan smoothly to world point (tx, ty) at this zoom, then call `done`. */
+function glideTo(tx: number, ty: number, done: () => void) {
+  stopGlide();
+  const [sx, sy] = [cx, cy];
+  const t0 = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - t0) / GLIDE_MS);
+    const e = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2; // ease in-out
+    move(sx + (tx - sx) * e - cx, sy + (ty - sy) * e - cy);
+    if (t < 1) glideFrame = requestAnimationFrame(step);
+    else done();
+  };
+  glideFrame = requestAnimationFrame(step);
+}
 
 /** Wide views: the map tiles name few peaks, so add the famous summits. */
 const SUMMITS_BELOW = 11;
@@ -605,6 +727,12 @@ function withSummits(r: SceneResult): Label[] {
   return extra.length ? [...r.labels, ...extra] : r.labels;
 }
 
+/** Ground metres per scene pixel, at the scene's middle. */
+function sceneMpp(r: SceneResult) {
+  const { lat } = worldToLonLat(r.originX + r.width / 2, r.originY + r.height / 2, r.z);
+  return (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** r.z);
+}
+
 /** A detailed scene is ready (from the worker, or a pre-built favourite). */
 async function acceptScene(msg: SceneResult) {
   await fontsReady;
@@ -613,7 +741,17 @@ async function acceptScene(msg: SceneResult) {
   pending = null;
   document.body.classList.remove('busy');
   const keep = new Set(scene?.features.labels.map((p) => labelKey(p.label)));
-  const features = buildFeatures(ctx, msg.tiles, withSummits(msg), msg.width, msg.height, keep);
+  const labels = withSummits(msg);
+  const features = buildFeatures(
+    ctx,
+    msg.tiles,
+    labels,
+    msg.width,
+    msg.height,
+    sceneMpp(msg),
+    msg.z,
+    keep,
+  );
   lastScene = msg;
   // One colour scale per arrival; re-fit only on reaching wholly new terrain.
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
@@ -621,7 +759,8 @@ async function acceptScene(msg: SceneResult) {
   range ??= { lo: scene.lo, hi: scene.hi };
   exportButton.disabled = false;
   atlas.addPeaks(msg.labels, msg.originX, msg.originY, msg.z);
-  updateLegend(scene.lo, scene.hi, scene.minor, scene.major);
+  const museums = labels.filter((l) => l.kind === 'museum').length;
+  updateLegend(scene.lo, scene.hi, scene.minor, scene.major, museums);
   if (!document.body.classList.contains('loaded')) settleArrival();
   reveal();
   requestDraw();
@@ -646,6 +785,7 @@ let lastMoveAt = 0;
 let settleTimer = 0;
 
 function move(dx: number, dy: number) {
+  collection.hide();
   cx += dx;
   cy += dy;
   const now = performance.now();
@@ -686,6 +826,8 @@ function updateZoomControls() {
 /** Step to `next`, keeping the world point under screen (ax, ay) in place. */
 function zoomTo(next: number, ax = w / 2, ay = h / 2) {
   if (!ZOOMS.includes(next) || next === zoom) return;
+  stopGlide();
+  collection.hide();
   const f = 2 ** (next - zoom);
   cx = (cx - w / 2 + ax) * f - ax + w / 2;
   cy = (cy - h / 2 + ay) * f - ay + h / 2;
@@ -753,6 +895,51 @@ function famousPeakAt(sx: number, sy: number) {
   return null;
 }
 
+// --- A town's museums: hover (or tap) its dot ---------------------------------
+
+/** How far (screen px) from a town's dot still reaches it. */
+const TOWN_REACH_PX = 12;
+/** Where the open collection's museums are, in world pixels: its scene's origin. */
+let collectionOrigin = { x: 0, y: 0 };
+const collection = createCollection(document.querySelector<HTMLElement>('#collection')!, (m) => {
+  const town = collectionTown;
+  glideTo(collectionOrigin.x + m.x, collectionOrigin.y + m.y, () =>
+    playCard({ eyebrow: 'Museum', name: m.name, detail: town }),
+  );
+  track('museum_pick', { name: m.name });
+});
+let collectionTown = '';
+
+/** The town with museums whose dot (or name) is under screen (sx, sy). */
+function townAt(sx: number, sy: number): PlacedLabel | null {
+  if (!scene || scene.zoom !== zoom) return null;
+  const x = cx - w / 2 + sx - scene.originX; // scene pixels
+  const y = cy - h / 2 + sy - scene.originY;
+  for (const p of scene.features.labels) {
+    if (!p.museums?.length) continue;
+    const { box, label } = p;
+    const onName = x > box[0] && x < box[2] && y > box[1] && y < box[3];
+    if (onName || Math.hypot(x - label.x, y - label.y) < TOWN_REACH_PX + (DOT[label.kind] ?? 0)) return p;
+  }
+  return null;
+}
+
+/** Open (or follow with) a town's museums; the pointer is at screen (px, py). */
+function openTown(p: PlacedLabel, px: number, py: number) {
+  const key = labelKey(p.label);
+  if (collection.openKey !== key) {
+    collectionOrigin = { x: scene!.originX, y: scene!.originY };
+    collectionTown = p.label.name;
+    track('museums_open', { town: p.label.name });
+  }
+  const badge = badgeOffset(DOT[p.label.kind] ?? 0);
+  const from = {
+    x: p.label.x + badge.x + scene!.originX - (cx - w / 2),
+    y: p.label.y + badge.y + scene!.originY - (cy - h / 2),
+  };
+  collection.show(key, p.label.name, p.museums!, from, { x: px, y: py });
+}
+
 // --- Pointer input: drag pans, pinch steps zoom (once per gesture) -----------
 
 const pointers = new Map<number, { x: number; y: number }>();
@@ -772,6 +959,7 @@ const spread = () => {
 };
 
 canvas.addEventListener('pointerdown', (e) => {
+  stopGlide();
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
   if (pointers.size === 1) {
@@ -788,7 +976,10 @@ canvas.addEventListener('pointermove', (e) => {
   if (!pointers.has(e.pointerId)) {
     // Hovering (no button down): famous peaks show as links.
     if (e.pointerType === 'mouse') {
-      canvas.classList.toggle('linkable', famousPeakAt(e.clientX, e.clientY) !== null);
+      const town = townAt(e.clientX, e.clientY);
+      if (town) openTown(town, e.clientX, e.clientY);
+      else collection.hideSoon();
+      canvas.classList.toggle('linkable', town !== null || famousPeakAt(e.clientX, e.clientY) !== null);
     }
     return;
   }
@@ -818,7 +1009,14 @@ const endPointer = (e: PointerEvent) => {
     performance.now() - press.at < CLICK_MS;
   press = null;
   if (click) {
-    const peak = famousPeakAt(e.clientX, e.clientY);
+    // A tap on a town opens its museums (touch has no hover); elsewhere closes them.
+    const town = townAt(e.clientX, e.clientY);
+    const peak = town ? null : famousPeakAt(e.clientX, e.clientY);
+    // A click pins the list where it is, so a museum can be picked.
+    if (town) {
+      openTown(town, e.clientX, e.clientY);
+      collection.pin();
+    } else collection.hide();
     if (peak) location.assign(`/mountains/${peak.key}/`);
   }
   if (pointers.size < 2) pinch = null;
@@ -903,7 +1101,10 @@ createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
   if (!scene || !lastScene) return;
   const m = lastScene;
   const keep = new Set(scene.features.labels.map((p) => labelKey(p.label)));
-  scene = { ...scene, features: buildFeatures(ctx, m.tiles, m.labels, m.width, m.height, keep) };
+  scene = {
+    ...scene,
+    features: buildFeatures(ctx, m.tiles, m.labels, m.width, m.height, sceneMpp(m), m.z, keep),
+  };
   requestDraw();
 });
 

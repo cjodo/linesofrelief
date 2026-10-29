@@ -1,10 +1,16 @@
 import { INK } from './config';
-import { DOT } from './features';
+import type { FindKind } from './contour.worker';
+import { DOT, MUSEUM_ICON } from './features';
 import { ramp } from './render';
 
 const fmt = new Intl.NumberFormat('en-US');
 
-export function createLegend(root: HTMLElement) {
+/** A legend row that finds its feature: the nearest one, on click. */
+const find = (kind: FindKind, noun: string) =>
+  `<div class="find" role="button" tabindex="0" data-find="${kind}" title="Go to the nearest ${noun}">`;
+
+/** `onFind` runs when a row is clicked: go to the nearest of that kind. */
+export function createLegend(root: HTMLElement, onFind: (kind: FindKind) => void) {
   root.innerHTML = `
     <button class="legend-head" type="button" aria-expanded="false" aria-controls="legend-body">
       <h2>Elevation</h2>
@@ -25,15 +31,15 @@ export function createLegend(root: HTMLElement) {
     </dl>
     <h3>Water</h3>
     <dl class="key">
-      <div><dt><svg viewBox="0 0 28 10">
+      ${find('ocean', 'coast')}<dt><svg viewBox="0 0 28 10">
           <rect x="0" y="0" width="28" height="10" fill="${INK.water}" fill-opacity="0.14"/>
           ${[2, 5, 8].map((y) => `<line x1="0" y1="${y}" x2="28" y2="${y}" stroke="${INK.shore}" stroke-opacity="0.35" stroke-width="0.6"/>`).join('')}
           <rect x="0.4" y="0.4" width="27.2" height="9.2" fill="none" stroke="${INK.shore}" stroke-opacity="0.7" stroke-width="0.8"/>
         </svg></dt><dd>ocean</dd></div>
-      <div><dt><svg viewBox="0 0 28 10">
+      ${find('lake', 'lake')}<dt><svg viewBox="0 0 28 10">
           <rect x="0.4" y="0.4" width="27.2" height="9.2" rx="4.6" fill="${INK.water}" fill-opacity="0.32" stroke="${INK.shore}" stroke-opacity="0.7" stroke-width="0.8"/>
         </svg></dt><dd>lake</dd></div>
-      <div><dt><svg viewBox="0 0 28 10">
+      ${find('river', 'river')}<dt><svg viewBox="0 0 28 10">
           <path d="M1 6C6 2 9 8 14 5S22 3 27 5" fill="none" stroke="${INK.shore}" stroke-opacity="0.9" stroke-width="1.4" stroke-linecap="round"/>
         </svg></dt><dd>river</dd></div>
     </dl>
@@ -41,7 +47,7 @@ export function createLegend(root: HTMLElement) {
     <dl class="key settlements">
       ${(['city', 'town', 'village'] as const)
         .map(
-          (k) => `<div><dt><svg viewBox="0 0 28 10">
+          (k) => `${find(k, k)}<dt><svg viewBox="0 0 28 10">
           <circle cx="14" cy="5" r="${DOT[k]}" fill="${k === 'city' ? INK.text : k === 'town' ? INK.subtle : INK.muted}"/>
         </svg></dt><dd class="${k}">${k}</dd></div>`,
         )
@@ -49,12 +55,15 @@ export function createLegend(root: HTMLElement) {
     </dl>
     <h3>Map</h3>
     <dl class="key">
-      <div><dt><svg viewBox="0 0 28 10">
+      ${find('border', 'border')}<dt><svg viewBox="0 0 28 10">
           <line x1="0" y1="5" x2="28" y2="5" stroke="${INK.border}" stroke-opacity="0.85" stroke-width="1.1" stroke-dasharray="7 4 1.5 4"/>
         </svg></dt><dd>national border</dd></div>
-      <div><dt><svg viewBox="0 0 28 10">
+      ${find('peak', 'summit')}<dt><svg viewBox="0 0 28 10">
           <path d="M14 1.5L18 8.5H10Z" fill="${INK.text}"/>
         </svg></dt><dd>summit</dd></div>
+      ${find('museum', 'museum')}<dt><svg class="tall" viewBox="0 0 28 16">
+          <path transform="translate(6 0)" d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/>
+        </svg></dt><dd>museum <span class="near"></span></dd></div>
     </dl>
     </div>`;
 
@@ -65,6 +74,20 @@ export function createLegend(root: HTMLElement) {
     head.setAttribute('aria-expanded', String(open));
   };
   head.addEventListener('click', () => setOpen(!root.classList.contains('open')));
+
+  // On a phone the open sheet covers the map: fold it to show the trip.
+  const go = (row: HTMLElement) => {
+    setOpen(false);
+    onFind(row.dataset.find as FindKind);
+  };
+  for (const row of root.querySelectorAll<HTMLElement>('[data-find]')) {
+    row.addEventListener('click', () => go(row));
+    row.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      go(row);
+    });
+  }
   document.addEventListener('pointerdown', (e) => {
     if (!root.contains(e.target as Node)) setOpen(false);
   });
@@ -80,8 +103,17 @@ export function createLegend(root: HTMLElement) {
   const majorEl = root.querySelector<HTMLElement>('.major')!;
   const minorEl = root.querySelector<HTMLElement>('.minor')!;
 
-  /** Colour range and the contour intervals of the zoom level on screen. */
-  return function update(lo: number, hi: number, minor: number, major: number) {
+  const museumRow = root.querySelector<HTMLElement>('[data-find="museum"]')!;
+  museumRow.hidden = true;
+  const nearEl = museumRow.querySelector<HTMLElement>('.near')!;
+
+  /**
+   * Colour range and the contour intervals of the zoom level on screen;
+   * `museums`: how many the map around the view has (the row shows only then).
+   */
+  return function update(lo: number, hi: number, minor: number, major: number, museums: number) {
+    museumRow.hidden = museums === 0;
+    nearEl.textContent = `${fmt.format(museums)} nearby`;
     majorEl.textContent = `${fmt.format(major)} m`;
     minorEl.textContent = `${fmt.format(minor)} m`;
     const key = `${lo}:${hi}`;
