@@ -24,6 +24,11 @@ const SIDE = TILE * 2 ** Z;
 /** Equirectangular texture: about one texel per screen pixel at the globe's size. */
 const W = 2048;
 const H = 1024;
+/**
+ * Lines are traced on elevation averaged over DOWNSAMPLE² texels: at globe
+ * size full-detail lines read as speckle, so they follow the broad shape.
+ */
+const DOWNSAMPLE = 4;
 /** Metres between contours; the ramp tops out at PEAK. */
 const INTERVAL = 500;
 const PEAK = 6000;
@@ -67,11 +72,45 @@ function elevation(lon: number, lat: number): number {
   return top * (1 - dy) + bottom * dy;
 }
 
-const elev = new Float32Array(W * H);
+const full = new Float32Array(W * H);
 for (let y = 0; y < H; y++) {
   const lat = 90 - ((y + 0.5) / H) * 180;
-  for (let x = 0; x < W; x++) elev[y * W + x] = elevation(((x + 0.5) / W) * 360 - 180, lat);
+  for (let x = 0; x < W; x++) full[y * W + x] = elevation(((x + 0.5) / W) * 360 - 180, lat);
 }
+
+/**
+ * `values` averaged over DOWNSAMPLE² blocks, then bilinear back up to full
+ * size (wrapping east-west): the same field, smoothed.
+ */
+function smooth(values: Float32Array): Float32Array {
+  const [cw, ch] = [W / DOWNSAMPLE, H / DOWNSAMPLE];
+  const coarse = new Float32Array(cw * ch);
+  for (let i = 0; i < W * H; i++) {
+    const [x, y] = [i % W, Math.floor(i / W)];
+    coarse[Math.floor(y / DOWNSAMPLE) * cw + Math.floor(x / DOWNSAMPLE)] += values[i] / DOWNSAMPLE ** 2;
+  }
+  const at = (cx: number, cy: number) => coarse[cy * cw + ((cx + cw) % cw)];
+  const out = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    const fy = Math.max(0, Math.min(ch - 1, (y + 0.5) / DOWNSAMPLE - 0.5));
+    const y0 = Math.min(ch - 2, Math.floor(fy));
+    const dy = fy - y0;
+    for (let x = 0; x < W; x++) {
+      const fx = (x + 0.5) / DOWNSAMPLE - 0.5;
+      const x0 = Math.floor(fx);
+      const dx = fx - x0;
+      const top = at(x0, y0) * (1 - dx) + at(x0 + 1, y0) * dx;
+      const bottom = at(x0, y0 + 1) * (1 - dx) + at(x0 + 1, y0 + 1) * dx;
+      out[y * W + x] = top * (1 - dy) + bottom * dy;
+    }
+  }
+  return out;
+}
+
+const elev = smooth(full);
+// The coast from how much of each block is land, not from heights: the sea
+// is a flat 0, so averaged heights near shore would trace the block grid.
+const land = smooth(full.map((e) => (e > 0 ? 1 : 0)));
 
 // --- Palette ---------------------------------------------------------------------
 
@@ -98,8 +137,8 @@ for (let s = 0; s < STEPS; s++) {
 
 // --- Lines -------------------------------------------------------------------------
 
-/** Contour band of a height; the sea is its own band, below every line. */
-const band = (e: number) => (e <= 0 ? -1 : Math.floor(e / INTERVAL));
+/** Contour band of texel `i`; the sea (under half land) is its own band, below every line. */
+const band = (i: number) => (land[i] < 0.5 ? -1 : Math.floor(Math.max(0, elev[i]) / INTERVAL));
 
 const out = new Uint8Array(W * H);
 for (let y = 0; y < H; y++) {
@@ -111,11 +150,11 @@ for (let y = 0; y < H; y++) {
   for (let x = 0; x < W; x++) {
     const i = y * W + x;
     const e = elev[i];
-    const b = band(e);
+    const b = band(i);
     // A line where this texel's band differs from its right or lower neighbour.
-    const right = elev[y * W + ((x + 1) % W)];
-    const below = y + 1 < H ? elev[i + W] : e;
-    const [br, bb] = [band(right), band(below)];
+    const [ri, bi] = [y * W + ((x + 1) % W), y + 1 < H ? i + W : i];
+    const [right, below] = [elev[ri], elev[bi]];
+    const [br, bb] = [band(ri), band(bi)];
     if (b === br && b === bb) {
       out[i] = b < 0 ? 1 : 0;
     } else if (b < 0 || br < 0 || bb < 0) {
