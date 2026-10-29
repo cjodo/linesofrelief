@@ -5,7 +5,7 @@ SERVER     := crates/server/target/release/topography-server
 SERVER_SRC := $(wildcard crates/server/src/*.rs) crates/server/Cargo.toml
 PORT       ?= 8080
 
-.PHONY: dev build serve server wasm og prerender favorites globe verify clean
+.PHONY: dev build serve server wasm og prerender favorites globe landmarks verify clean
 
 # Start the server (next free port if $(PORT) is taken), wait until it has
 # written the port it bound, and leave it in $$port / its pid in $$pid.
@@ -69,6 +69,14 @@ globe: node_modules $(SERVER)
 	@npx esbuild scripts/globe.ts --bundle --platform=node --format=esm \
 	  --outfile=$(GLOBE_SCRIPT) --log-level=warning
 	$(call with-server,$(GLOBE_SCRIPT))
+
+## landmarks: clay renders of site/landmarks.ts in Blender (public/landmarks/, public/og/landmarks/)
+##            (optionally SLUGS="colosseum"); one Blender each keeps memory low
+LANDMARK_SLUGS := $(shell sed -n "s/^    slug: '\(.*\)',$$/\1/p" site/landmarks.ts)
+landmarks:
+	@for slug in $(or $(SLUGS),$(LANDMARK_SLUGS)); do \
+	  blender -b --factory-startup -P scripts/landmarks.py -- "$(CURDIR)" $$slug 2>&1 | grep -E '^rendered|Error' || exit 1; \
+	done
 
 ## verify: check summit coordinates in site/peaks.ts against the elevation tiles
 verify: node_modules
