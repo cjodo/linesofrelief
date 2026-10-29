@@ -61,8 +61,12 @@ export function museumInfo({ name, town, lat, lon }: MuseumSpot): Promise<Museum
   return hit;
 }
 
-const escape = (s: string) =>
+// Sanitize text for HTML content
+const escapeText = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+// Sanitize URLs for HTML attributes
+const escapeUrl = (s: string) => encodeURI(s);
 
 const icon = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/></svg>`;
 
@@ -93,7 +97,7 @@ export function renderMuseum(
   }
   const p = info.photo;
   const credit = p
-    ? `<figcaption><a href="${escape(p.page)}" target="_blank" rel="noopener">${p.artist ? `${escape(p.artist)} · ` : ''}${escape(p.license)}</a></figcaption>`
+    ? `<figcaption><a href="${escapeUrl(p.page)}" target="_blank" rel="noopener noreferrer">${p.artist ? `${escapeText(p.artist)} · ` : ''}${escapeText(p.license)}</a></figcaption>`
     : '';
   root.innerHTML = `${close}
     ${p ? `<figure class="photo"><img src="${escape(p.thumb.source)}" alt="${escape(info.title)}" width="${p.thumb.width}" height="${p.thumb.height}" decoding="async">${credit}</figure>` : ''}
