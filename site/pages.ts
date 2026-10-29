@@ -274,10 +274,12 @@ export function useAnalytics(id: string) {
 }
 
 /**
- * The Google tag, loaded 1.5 s after the page has loaded so its script never
- * delays the first paint or the map (events queue in dataLayer until then).
- * History changes (searches, favourites) are page views through GA4's
- * enhanced measurement.
+ * The Google tag, behind a consent banner. Nothing from Google loads until the
+ * visitor says yes; the answer is remembered per browser, and a "Cookies"
+ * link (shown only when analytics is built in) reopens the question. Once
+ * allowed, the script loads 1.5 s after the page, never delaying the map;
+ * events queue in dataLayer until then. History changes (searches,
+ * favourites) are page views through GA4's enhanced measurement.
  */
 export function analyticsHtml(): string {
   if (!tagId) return '';
@@ -286,18 +288,92 @@ export function analyticsHtml(): string {
     ? `https://www.googletagmanager.com/gtm.js?id=${tagId}`
     : `https://www.googletagmanager.com/gtag/js?id=${tagId}`;
   return `    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag() { dataLayer.push(arguments); }
-      gtag('js', new Date());
-      ${gtm ? "window.topoAnalytics = 'gtm';" : `gtag('config', '${tagId}');`}
-      addEventListener('load', function () {
-        setTimeout(function () {
-          var s = document.createElement('script');
-          s.async = true;
-          s.src = '${src}';
-          document.head.appendChild(s);
-        }, 1500);
-      });
+      (function () {
+        var KEY = 'topography:consent';
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { dataLayer.push(arguments); };
+        gtag('js', new Date());
+        ${gtm ? "window.topoAnalytics = 'gtm';" : `gtag('config', '${tagId}');`}
+        document.documentElement.classList.add('consent');
+
+        var loaded = false;
+        function load() {
+          if (loaded) return;
+          loaded = true;
+          var go = function () {
+            setTimeout(function () {
+              var s = document.createElement('script');
+              s.async = true;
+              s.src = '${src}';
+              document.head.appendChild(s);
+            }, 1500);
+          };
+          if (document.readyState === 'complete') go();
+          else addEventListener('load', go);
+        }
+        function get() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+        function set(v) { try { localStorage.setItem(KEY, v); } catch (e) {} }
+        function forget() {
+          // Clear Google's first-party cookies (_ga, _ga_XXXX) on this host and its parent.
+          document.cookie.split(';').forEach(function (c) {
+            var name = c.split('=')[0].trim();
+            if (!/^_ga/.test(name)) return;
+            var host = location.hostname;
+            [host, '.' + host, '.' + host.split('.').slice(-2).join('.')].forEach(function (d) {
+              document.cookie = name + '=; Max-Age=0; path=/; domain=' + d;
+            });
+            document.cookie = name + '=; Max-Age=0; path=/';
+          });
+        }
+
+        var card;
+        function ask() {
+          if (card) { card.classList.add('on'); return; }
+          card = document.createElement('section');
+          card.className = 'consent-card';
+          card.setAttribute('role', 'region');
+          card.setAttribute('aria-label', 'Cookie consent');
+          card.innerHTML =
+            '<h2>Cookies, briefly</h2>' +
+            '<p>Topography would like to use Google Analytics to see which places people explore. ' +
+            'It sets cookies only if you say yes, and you can change your mind any time from ' +
+            '<em>Cookies</em> at the bottom of the page.</p>' +
+            '<div class="consent-actions">' +
+            '<button type="button" class="consent-yes">Allow analytics</button>' +
+            '<button type="button" class="consent-no">No thanks</button></div>';
+          card.querySelector('.consent-yes').addEventListener('click', function () {
+            set('granted');
+            close();
+            load();
+          });
+          card.querySelector('.consent-no').addEventListener('click', function () {
+            var was = get();
+            set('denied');
+            forget();
+            close();
+            if (was === 'granted' && loaded) location.reload(); // stop the running tag
+          });
+          document.body.appendChild(card);
+          requestAnimationFrame(function () { requestAnimationFrame(function () { card.classList.add('on'); }); });
+        }
+        function close() { if (card) card.classList.remove('on'); }
+
+        document.addEventListener('click', function (e) {
+          var t = e.target.closest && e.target.closest('[data-consent]');
+          if (!t) return;
+          e.preventDefault();
+          ask();
+        });
+
+        var choice = get();
+        if (choice === 'granted') load();
+        else if (choice !== 'denied') {
+          // Ask a moment after the page (and the map) have appeared.
+          var later = function () { setTimeout(ask, 1800); };
+          if (document.readyState === 'complete') later();
+          else addEventListener('load', later);
+        }
+      })();
     </script>`;
 }
 
@@ -446,6 +522,7 @@ ${body}
         <a href="/">Search the whole world →</a>
         <a href="/mountains/">All summits</a>
         ${summit ? `<a href="${mapPath(summit)}">${esc(summit.name)} on the live map</a>` : ''}
+        <a href="#" class="consent-link" data-consent>Cookies</a>
         <span class="credits">${CREDITS}</span>
       </footer>
     </main>
