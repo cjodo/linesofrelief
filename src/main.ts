@@ -33,6 +33,7 @@ import { createMinimap } from './minimap';
 import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
 import { createCollection } from './collection';
+import { createMuseumCard } from './museum-card';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch } from './search';
 import { createCoordEntry } from './coord-entry';
@@ -361,6 +362,7 @@ function arrive(
 ) {
   stopGlide();
   collection.hide();
+  museumCard.hide();
   // A link's zoom wins; a search keeps the reader's; otherwise the default.
   zoom = place.zoom ?? (keepZoom ? zoom : DEFAULT_ZOOM);
   updateZoomControls();
@@ -790,6 +792,7 @@ let settleTimer = 0;
 
 function move(dx: number, dy: number) {
   collection.hide();
+  museumCard.hide();
   cx += dx;
   cy += dy;
   const now = performance.now();
@@ -832,6 +835,7 @@ function zoomTo(next: number, ax = w / 2, ay = h / 2) {
   if (!ZOOMS.includes(next) || next === zoom) return;
   stopGlide();
   collection.hide();
+  museumCard.hide();
   const f = 2 ** (next - zoom);
   cx = (cx - w / 2 + ax) * f - ax + w / 2;
   cy = (cy - h / 2 + ay) * f - ay + h / 2;
@@ -901,18 +905,38 @@ function famousPeakAt(sx: number, sy: number) {
 
 // --- A town's museums: hover (or tap) its dot ---------------------------------
 
+/** How far (screen px) from a museum icon's centre still reaches it. */
+const MUSEUM_REACH_PX = 11;
 /** How far (screen px) from a town's dot still reaches it. */
 const TOWN_REACH_PX = 12;
 /** Where the open collection's museums are, in world pixels: its scene's origin. */
 let collectionOrigin = { x: 0, y: 0 };
 const collection = createCollection(document.querySelector<HTMLElement>('#collection')!, (m) => {
-  const town = collectionTown;
-  glideTo(collectionOrigin.x + m.x, collectionOrigin.y + m.y, () =>
-    playCard({ eyebrow: 'Museum', name: m.name, detail: town }),
-  );
-  track('museum_pick', { name: m.name });
+  visitMuseum(m.name, collectionTown, collectionOrigin.x + m.x, collectionOrigin.y + m.y);
 });
 let collectionTown = '';
+
+const museumCard = createMuseumCard(document.querySelector<HTMLElement>('#museum-card')!);
+
+/** Glide to a museum (world pixels at this zoom), then open its card beside it. */
+function visitMuseum(name: string, town: string | undefined, wx: number, wy: number) {
+  const { lat, lon } = worldToLonLat(wx, wy, zoom);
+  track('museum_open', { name });
+  glideTo(wx, wy, () => museumCard.show({ name, town, lat, lon }, w / 2, h / 2));
+}
+
+/** A drawn museum icon under screen (sx, sy), and the town it belongs to. */
+function museumAt(sx: number, sy: number) {
+  if (!scene || scene.zoom !== zoom) return null;
+  const x = cx - w / 2 + sx - scene.originX;
+  const y = cy - h / 2 + sy - scene.originY;
+  const hit = scene.features.labels.find(
+    ({ label }) => label.kind === 'museum' && Math.hypot(label.x - x, label.y - y) < MUSEUM_REACH_PX,
+  );
+  if (!hit) return null;
+  const town = scene.features.labels.find((p) => p.museums?.some((m) => m.name === hit.label.name));
+  return { label: hit.label, town: town?.label.name, scene };
+}
 
 /** The town with museums whose dot (or name) is under screen (sx, sy). */
 function townAt(sx: number, sy: number): PlacedLabel | null {
@@ -983,7 +1007,8 @@ canvas.addEventListener('pointermove', (e) => {
       const town = townAt(e.clientX, e.clientY);
       if (town) openTown(town, e.clientX, e.clientY);
       else collection.hideSoon();
-      canvas.classList.toggle('linkable', town !== null || famousPeakAt(e.clientX, e.clientY) !== null);
+      const linkable = town || museumAt(e.clientX, e.clientY) || famousPeakAt(e.clientX, e.clientY);
+      canvas.classList.toggle('linkable', Boolean(linkable));
     }
     return;
   }
@@ -1014,13 +1039,20 @@ const endPointer = (e: PointerEvent) => {
   press = null;
   if (click) {
     // A tap on a town opens its museums (touch has no hover); elsewhere closes them.
-    const town = townAt(e.clientX, e.clientY);
-    const peak = town ? null : famousPeakAt(e.clientX, e.clientY);
-    // A click pins the list where it is, so a museum can be picked.
-    if (town) {
+    const museum = museumAt(e.clientX, e.clientY);
+    const town = museum ? null : townAt(e.clientX, e.clientY);
+    const peak = museum || town ? null : famousPeakAt(e.clientX, e.clientY);
+    if (museum) {
+      const { label, scene: s } = museum;
+      visitMuseum(label.name, museum.town, s.originX + label.x, s.originY + label.y);
+    } else if (town) {
+      // A click pins the list where it is, so a museum can be picked.
       openTown(town, e.clientX, e.clientY);
       collection.pin();
-    } else collection.hide();
+    } else {
+      collection.hide();
+      museumCard.hide();
+    }
     if (peak) location.assign(`/mountains/${peak.key}/`);
   }
   if (pointers.size < 2) pinch = null;
