@@ -664,10 +664,39 @@ function showScale(lat: number) {
   scaleBar.style.setProperty('--bar', width);
 }
 
+// --- Famous peaks are links to their summary pages ------------------------------
+
+/** A curated summit's label must sit this close (atlas px, ≈3 km) to count as it. */
+const CURATED_MATCH_PX = 110;
+/** Hit slop around a label's box, in screen pixels. */
+const LABEL_SLOP = 4;
+
+/** The curated summit whose label (or marker) is under screen point (sx, sy). */
+function famousPeakAt(sx: number, sy: number) {
+  if (!scene || scene.zoom !== zoom) return null; // not while a stand-in is showing
+  const x = cx - w / 2 + sx - scene.originX; // scene pixels
+  const y = cy - h / 2 + sy - scene.originY;
+  const f = 2 ** (ATLAS_ZOOM - zoom);
+  for (const { label, box } of scene.features.labels) {
+    if (label.kind !== 'peak') continue;
+    if (x < box[0] - LABEL_SLOP || x > box[2] + LABEL_SLOP) continue;
+    if (y < box[1] - LABEL_SLOP || y > box[3] + LABEL_SLOP) continue;
+    const ax = (scene.originX + label.x) * f;
+    const ay = (scene.originY + label.y) * f;
+    const peak = atlas.curatedAt(ax, ay, CURATED_MATCH_PX);
+    if (peak) return peak;
+  }
+  return null;
+}
+
 // --- Pointer input: drag pans, pinch steps zoom (once per gesture) -----------
 
 const pointers = new Map<number, { x: number; y: number }>();
 let drag: { x: number; y: number } | null = null;
+/** The press that may turn out to be a click (not a drag or a pinch). */
+let press: { x: number; y: number; at: number; moved: number } | null = null;
+const CLICK_MOVE_PX = 6;
+const CLICK_MS = 400;
 let pinch: { spread: number; stepped: boolean } | null = null;
 /** Spread change that counts as a pinch step (in or out). */
 const PINCH_IN = 1.4;
@@ -683,14 +712,23 @@ canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   if (pointers.size === 1) {
     drag = { x: e.clientX, y: e.clientY };
+    press = { x: e.clientX, y: e.clientY, at: performance.now(), moved: 0 };
     canvas.classList.add('dragging');
   } else if (pointers.size === 2) {
     drag = null;
+    press = null;
     pinch = { spread: spread(), stepped: false };
   }
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (!pointers.has(e.pointerId)) return;
+  if (!pointers.has(e.pointerId)) {
+    // Hovering (no button down): famous peaks show as links.
+    if (e.pointerType === 'mouse') {
+      canvas.classList.toggle('linkable', famousPeakAt(e.clientX, e.clientY) !== null);
+    }
+    return;
+  }
+  if (press) press.moved = Math.max(press.moved, Math.hypot(e.clientX - press.x, e.clientY - press.y));
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pinch && pointers.size >= 2) {
     const ratio = spread() / pinch.spread;
@@ -707,6 +745,18 @@ canvas.addEventListener('pointermove', (e) => {
 });
 const endPointer = (e: PointerEvent) => {
   pointers.delete(e.pointerId);
+  // A short, still press on a famous peak opens its summary.
+  const click =
+    e.type === 'pointerup' &&
+    press !== null &&
+    pointers.size === 0 &&
+    press.moved < CLICK_MOVE_PX &&
+    performance.now() - press.at < CLICK_MS;
+  press = null;
+  if (click) {
+    const peak = famousPeakAt(e.clientX, e.clientY);
+    if (peak) location.assign(`/mountains/${peak.key}/`);
+  }
   if (pointers.size < 2) pinch = null;
   // Lifting one finger of a pinch continues as a drag from where it is.
   const rest = [...pointers.values()][0];

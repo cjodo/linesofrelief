@@ -84,6 +84,20 @@ export class Atlas {
     );
   }
 
+  /** The curated summit (key = its slug) nearest (x, y), within `radius` world pixels. */
+  curatedAt(x: number, y: number, radius: number): Landmark | null {
+    let best: Landmark | null = null;
+    let bestD = radius;
+    for (const m of this.marks) {
+      const d = Math.hypot(m.x - x, m.y - y);
+      if (m.curated && d < bestD) {
+        best = m;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
   /** The summit important at `zoom` nearest (x, y), within `radius` world pixels. */
   near(x: number, y: number, radius: number, zoom: number): Landmark | null {
     let best: Landmark | null = null;

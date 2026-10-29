@@ -58,7 +58,7 @@ if (!ONLY.length) {
 for (const p of PEAKS) {
   if (ONLY.length && !ONLY.includes(p.slug)) continue;
   await shoot(
-    `/mountains/${p.slug}/`,
+    `/mountains/${p.slug}/map/`,
     `Topography · ${fmt.format(p.ele)} m · ${p.range}`,
     p.name,
     `${OUT}og/${p.slug}.jpg`,

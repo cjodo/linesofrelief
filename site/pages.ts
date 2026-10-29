@@ -7,6 +7,8 @@ import { detailOf, PEAKS, type Peak } from './peaks.ts';
 
 export interface Page {
   path: string;
+  /** Where search engines should look instead (a summit's map → its summary). */
+  canonical?: string;
   title: string;
   description: string;
   image: string;
@@ -40,7 +42,9 @@ const toFeet = (m: number) => Math.round(m * 3.28084);
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
+/** A summit's summary page (canonical) and its live map. */
 export const peakPath = (p: Peak) => `/mountains/${p.slug}/`;
+export const mapPath = (p: Peak) => `/mountains/${p.slug}/map/`;
 
 function distanceKm(a: Peak, b: Peak) {
   const rad = Math.PI / 180;
@@ -99,16 +103,33 @@ export function rootPage(
   };
 }
 
-export function peakPage(
-  p: Peak,
-  site: string,
-  hasImage: boolean,
-  hasPrerender = false,
-): Page {
+/** The live map arriving at a summit; its summary is the canonical page. */
+export function peakPage(p: Peak, hasImage: boolean, hasPrerender = false): Page {
+  return {
+    path: mapPath(p),
+    canonical: peakPath(p),
+    title: `${p.name} live contour map · ${SITE_NAME}`,
+    description: summitDescription(p),
+    image: hasImage ? `/og/${p.slug}.jpg` : '/og.jpg',
+    imageAlt: `Contour lines of ${p.name}, drawn in teal, iris, rose and gold on a dark background`,
+    spot: { name: p.name, lat: p.lat, lon: p.lon, detail: detailOf(p) },
+    prerender: hasPrerender ? p.slug : undefined,
+    jsonLd: [],
+    about:
+      `The live contour map of ${esc(p.name)}: drag to explore, or search for another summit. ` +
+      `<a href="${peakPath(p)}">About ${esc(p.name)}</a>. ` +
+      `Nearby: ${nearby(p).map(link).join(', ')}. <a href="/mountains/">All summits</a>.`,
+  };
+}
+
+const summitDescription = (p: Peak) =>
+  `${p.name} (${fmt.format(p.ele)} m), ${p.range}, ${p.country}: an artistic topographic map ` +
+  'with contour lines every 50 m, coloured by elevation, plus rivers, lakes and nearby peaks.';
+
+/** A summit's summary page: the canonical page for the peak. */
+export function summaryPage(p: Peak, site: string, hasImage: boolean): Page {
   const url = `${site}${peakPath(p)}`;
-  const description =
-    `${p.name} (${fmt.format(p.ele)} m), ${p.range}, ${p.country}: an artistic topographic map ` +
-    'with contour lines every 50 m, coloured by elevation, plus rivers, lakes and nearby peaks.';
+  const description = summitDescription(p);
   const image = hasImage ? `/og/${p.slug}.jpg` : '/og.jpg';
   return {
     path: peakPath(p),
@@ -116,8 +137,6 @@ export function peakPage(
     description,
     image,
     imageAlt: `Contour lines of ${p.name}, drawn in teal, iris, rose and gold on a dark background`,
-    spot: { name: p.name, lat: p.lat, lon: p.lon, detail: detailOf(p) },
-    prerender: hasPrerender ? p.slug : undefined,
     jsonLd: [
       {
         '@context': 'https://schema.org',
@@ -139,12 +158,6 @@ export function peakPage(
         ],
       },
     ],
-    about:
-      `${esc(p.name)} (${esc(p.range)}, ${esc(p.country)}) rises ${fmt.format(p.ele)} metres ` +
-      `(${fmt.format(toFeet(p.ele))} ft). This map draws its terrain as contour lines every 50 metres, ` +
-      'coloured from teal valleys to a gold summit, with rivers, lakes, borders and neighbouring peaks. ' +
-      'Drag to explore, or search for another summit. ' +
-      `Nearby: ${nearby(p).map(link).join(', ')}. <a href="/mountains/">All summits</a>.`,
   };
 }
 
@@ -186,7 +199,7 @@ export function headTags(
   site: string,
   version: (path: string) => string | undefined = () => undefined,
 ): string {
-  const url = `${site}${page.path}`;
+  const url = `${site}${page.canonical ?? page.path}`;
   const v = version(page.image);
   const image = `${site}${page.image}${v ? `?v=${v}` : ''}`;
   return [
@@ -248,30 +261,99 @@ export function htmlAttrs(page: Page): string {
     .join('');
 }
 
-/** The /mountains/ index: a typographic list, tallest first. */
-export function hubHtml(
-  site: string,
-  stylesheet: string,
-  favicon: string,
-  version?: (path: string) => string | undefined,
-): string {
-  const page = hubPage(site);
-  const max = Math.max(...PEAKS.map((p) => p.ele));
-  const items = [...PEAKS]
-    .sort((a, b) => b.ele - a.ele)
-    .map((p) => {
-      const pct = ((p.ele / max) * 100).toFixed(1);
-      return `
-        <li>
-          <a href="${peakPath(p)}">
-            <span class="name">${esc(p.name)}</span>
-            <span class="ele">${fmt.format(p.ele)} m</span>
-            <span class="bar" style="--w: ${pct}%; --wn: ${pct}"></span>
-            <span class="where">${esc(p.range)} · ${esc(p.country)}</span>
-          </a>
-        </li>`;
-    })
-    .join('');
+// --- Static pages (index, summaries): no app script, the server only serves files
+
+/** Styles shared by the index and the summaries, on top of the site stylesheet. */
+const PAGE_CSS = `
+      html, body { height: auto; overflow: auto; }
+      body { padding: max(24px, 6vw) max(16px, 6vw) 96px; }
+      .page { max-width: 920px; margin: 0 auto; }
+      .page .nav { position: static; height: auto; flex-wrap: wrap; row-gap: 12px; }
+      .page h1 { margin: 40px 0 16px; font: italic 400 clamp(3rem, 10vw, 6.5rem) / 0.92 var(--serif); }
+      .page h2 {
+        margin: 72px 0 18px; font: 400 0.68rem/1 var(--mono); letter-spacing: 0.24em;
+        text-transform: uppercase; color: var(--subtle);
+      }
+      .page .lede { max-width: 46ch; font: italic 400 1.2rem/1.45 var(--serif); color: var(--subtle); }
+      .page a { color: inherit; }
+      .list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--overlay); }
+      .list li a {
+        display: grid; grid-template-columns: 1fr auto; gap: 8px 24px; align-items: baseline;
+        padding: 20px 0 18px; border-bottom: 1px solid var(--overlay); text-decoration: none;
+      }
+      .list .name { font: italic 400 clamp(1.5rem, 4vw, 2.1rem) / 1.05 var(--serif); transition: color 0.2s; }
+      .list li a:hover .name, .list li a:focus-visible .name { color: var(--rose); }
+      .list li a[aria-current] .name { color: var(--gold, #f6c177); }
+      .list .ele { font: 400 0.8rem/1 var(--mono); letter-spacing: 0.08em; color: var(--subtle); font-variant-numeric: tabular-nums; }
+      .list .bar {
+        grid-column: 1 / -1; height: 2px; width: var(--w); border-radius: 1px;
+        /* The full ramp spans the tallest summit; lower peaks show only its lower part. */
+        background: linear-gradient(to right, #31748f, #9ccfd8, #c4a7e7, #ebbcba, #f6c177);
+        background-size: calc(100% * 100 / var(--wn, 100)) 100%;
+      }
+      .list .where {
+        grid-column: 1 / -1; font: 400 0.62rem/1.4 var(--mono); letter-spacing: 0.18em;
+        text-transform: uppercase; color: var(--muted);
+      }
+      /* Summary */
+      .hero { position: relative; margin: 32px calc(-1 * max(16px, 6vw)) 0; }
+      .hero img { display: block; width: 100%; height: min(62vh, 560px); object-fit: cover; }
+      .hero::after {
+        content: ''; position: absolute; inset: 0; pointer-events: none;
+        background: linear-gradient(to bottom, transparent 45%, var(--base) 98%);
+      }
+      .hero-text { position: relative; z-index: 1; margin-top: -9rem; text-shadow: 0 0 24px var(--base), 0 0 8px var(--base); }
+      .hero-text .eyebrow, .facts dt, .page footer, .near .dist {
+        font: 400 0.66rem/1.4 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--subtle);
+      }
+      .hero-text h1 { margin: 12px 0 10px; }
+      .hero-text .detail { font: italic 400 1.35rem/1.3 var(--serif); color: var(--subtle); }
+      .cta {
+        display: inline-flex; align-items: center; gap: 10px; margin-top: 26px; padding: 13px 20px;
+        border: 1px solid color-mix(in srgb, var(--rose) 45%, var(--overlay)); border-radius: 2px;
+        background: color-mix(in srgb, var(--surface) 82%, transparent);
+        font: 400 0.72rem/1 var(--mono); letter-spacing: 0.2em; text-transform: uppercase;
+        color: var(--text); text-decoration: none; text-shadow: none; transition: color 0.2s, border-color 0.2s;
+      }
+      .cta:hover, .cta:focus-visible { color: var(--rose); border-color: var(--rose); outline: none; }
+      .facts {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 28px 32px;
+        margin: 64px 0 0; padding: 28px 0; border-top: 1px solid var(--overlay); border-bottom: 1px solid var(--overlay);
+      }
+      .facts dd { margin: 10px 0 0; font: italic 400 1.45rem/1.15 var(--serif); }
+      .facts dd small { display: block; margin-top: 6px; font: 400 0.66rem/1.3 var(--mono); letter-spacing: 0.08em; font-style: normal; color: var(--subtle); }
+      .prose { max-width: 60ch; margin-top: 48px; }
+      .prose p { margin: 0 0 1.1em; font: italic 400 1.3rem/1.5 var(--serif); color: color-mix(in srgb, var(--text) 88%, var(--subtle)); }
+      .prose a { text-decoration-color: color-mix(in srgb, var(--rose) 60%, transparent); text-underline-offset: 3px; }
+      .near { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--overlay); }
+      .near li a {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+        padding: 16px 0; border-bottom: 1px solid var(--overlay); text-decoration: none;
+      }
+      .near .name { font: italic 400 1.4rem/1.1 var(--serif); transition: color 0.2s; }
+      .near li a:hover .name { color: var(--rose); }
+      .page footer { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; margin-top: 80px; padding-top: 28px; border-top: 1px solid var(--overlay); }
+      .page footer a { text-decoration: none; color: var(--text); }
+      .page footer a:hover { color: var(--rose); }
+      .page footer .credits { flex-basis: 100%; color: var(--muted); letter-spacing: 0.08em; text-transform: none; }
+`;
+
+const CREDITS =
+  'Elevation: AWS Terrain Tiles · Map data © OpenStreetMap contributors, © OpenMapTiles, via OpenFreeMap';
+
+interface Shell {
+  page: Page;
+  site: string;
+  stylesheet: string;
+  favicon: string;
+  version?: (path: string) => string | undefined;
+  /** The nav's current item: the index, or a summit (with a link to its map). */
+  current: 'summits' | Peak;
+  body: string;
+}
+
+function shell({ page, site, stylesheet, favicon, version, current, body }: Shell): string {
+  const summit = current === 'summits' ? null : current;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -288,48 +370,173 @@ ${headTags(page, site, version)}
         if ([1.1, 1.2, 1.3].indexOf(t) >= 0) document.documentElement.style.setProperty('--text-scale', t);
       } catch (e) {}
     </script>
-    <style>
-      html, body { height: auto; overflow: auto; }
-      body { padding: max(24px, 6vw) max(16px, 6vw) 96px; }
-      .hub { max-width: 920px; margin: 0 auto; }
-      .hub .nav { position: static; height: auto; }
-      .hub h1 { margin: 40px 0 16px; font: italic 400 clamp(3rem, 10vw, 6.5rem) / 0.92 var(--serif); }
-      .hub .lede { max-width: 46ch; font: italic 400 1.2rem/1.45 var(--serif); color: var(--subtle); }
-      .hub ol { margin: 56px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--overlay); }
-      .hub li a {
-        display: grid; grid-template-columns: 1fr auto; gap: 8px 24px; align-items: baseline;
-        padding: 20px 0 18px; border-bottom: 1px solid var(--overlay);
-        color: inherit; text-decoration: none;
-      }
-      .hub .name { font: italic 400 clamp(1.5rem, 4vw, 2.1rem) / 1.05 var(--serif); transition: color 0.2s; }
-      .hub li a:hover .name, .hub li a:focus-visible .name { color: var(--rose); }
-      .hub .ele { font: 400 0.8rem/1 var(--mono); letter-spacing: 0.08em; color: var(--subtle); font-variant-numeric: tabular-nums; }
-      .hub .bar {
-        grid-column: 1 / -1; height: 2px; width: var(--w); border-radius: 1px;
-        /* The full ramp spans the tallest summit; lower peaks show only its lower part. */
-        background: linear-gradient(to right, #31748f, #9ccfd8, #c4a7e7, #ebbcba, #f6c177);
-        background-size: calc(100% * 100 / var(--wn, 100)) 100%;
-      }
-      .hub .where {
-        grid-column: 1 / -1; font: 400 0.62rem/1.4 var(--mono); letter-spacing: 0.18em;
-        text-transform: uppercase; color: var(--muted);
-      }
-    </style>
+    <style>${PAGE_CSS}    </style>
   </head>
   <body>
-    <main class="hub">
+    <main class="page">
       <nav class="nav" aria-label="Site">
         <a class="brand" href="/">Topography</a>
-        <a href="/mountains/" aria-current="page">Summits</a>
+        <a href="/mountains/"${summit ? '' : ' aria-current="page"'}>Summits</a>
+        ${summit ? `<a href="${mapPath(summit)}">Live map</a>` : ''}
       </nav>
-      <h1>Summits</h1>
-      <p class="lede">${esc(page.description)}</p>
-      <ol>${items}
-      </ol>
+${body}
+      <footer>
+        <a href="/">Search the whole world →</a>
+        <a href="/mountains/">All summits</a>
+        ${summit ? `<a href="${mapPath(summit)}">${esc(summit.name)} on the live map</a>` : ''}
+        <span class="credits">${CREDITS}</span>
+      </footer>
     </main>
   </body>
 </html>
 `;
+}
+
+/** One summit as a row: name, elevation, its share of the elevation ramp, where. */
+function summitRow(p: Peak, max: number, current?: Peak) {
+  const pct = ((p.ele / max) * 100).toFixed(1);
+  return `
+        <li>
+          <a href="${peakPath(p)}"${p === current ? ' aria-current="page"' : ''}>
+            <span class="name">${esc(p.name)}</span>
+            <span class="ele">${fmt.format(p.ele)} m</span>
+            <span class="bar" style="--w: ${pct}%; --wn: ${pct}"></span>
+            <span class="where">${esc(p.range)} · ${esc(p.country)}</span>
+          </a>
+        </li>`;
+}
+
+/** The /mountains/ index: a typographic list, tallest first. */
+export function hubHtml(
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version?: (path: string) => string | undefined,
+): string {
+  const page = hubPage(site);
+  const max = Math.max(...PEAKS.map((p) => p.ele));
+  const rows = [...PEAKS].sort((a, b) => b.ele - a.ele).map((p) => summitRow(p, max)).join('');
+  return shell({
+    page,
+    site,
+    stylesheet,
+    favicon,
+    version,
+    current: 'summits',
+    body: `      <h1>Summits</h1>
+      <p class="lede">${esc(page.description)}</p>
+      <ol class="list" style="margin-top: 56px">${rows}
+      </ol>`,
+  });
+}
+
+// --- Summary facts, from the data only -----------------------------------------
+
+const ordinal = (n: number) => {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+};
+
+function dms(value: number, pos: string, neg: string) {
+  const a = Math.abs(value);
+  const d = Math.floor(a);
+  const m = Math.floor((a - d) * 60);
+  const sec = Math.round(((a - d) * 60 - m) * 60);
+  return `${d}° ${String(m).padStart(2, '0')}′ ${String(sec).padStart(2, '0')}″ ${value >= 0 ? pos : neg}`;
+}
+
+/** Initial compass bearing from a to b, as one of eight points. */
+function bearing(a: Peak, b: Peak) {
+  const rad = Math.PI / 180;
+  const y = Math.sin((b.lon - a.lon) * rad) * Math.cos(b.lat * rad);
+  const x =
+    Math.cos(a.lat * rad) * Math.sin(b.lat * rad) -
+    Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos((b.lon - a.lon) * rad);
+  const deg = (Math.atan2(y, x) / rad + 360) % 360;
+  return ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][
+    Math.round(deg / 45) % 8
+  ];
+}
+
+/** A summit's summary: what it is, where, its neighbours, and the way back to the map. */
+export function summaryHtml(
+  p: Peak,
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version: ((path: string) => string | undefined) | undefined,
+  hasImage: boolean,
+  hasPrerender: boolean,
+): string {
+  const page = summaryPage(p, site, hasImage);
+  const byHeight = [...PEAKS].sort((a, b) => b.ele - a.ele);
+  const rank = byHeight.indexOf(p) + 1;
+  const max = byHeight[0].ele;
+  const peers = byHeight.filter((q) => q.range === p.range);
+  const near = nearby(p);
+  const closest = near[0];
+  const km = (q: Peak) => fmt.format(Math.round(distanceKm(p, q)));
+
+  const hero = hasPrerender
+    ? `<picture>
+          <source media="${PRERENDER.sm.media}" srcset="${prerenderSrc(p.slug, 'sm')}" />
+          <img src="${prerenderSrc(p.slug, 'lg')}" alt="Contour map of ${esc(p.name)}" fetchpriority="high" />
+        </picture>`
+    : `<img src="/og/${p.slug}.jpg" alt="Contour map of ${esc(p.name)}" fetchpriority="high" />`;
+
+  const body = `      <header>
+        <div class="hero">
+        ${hero}
+        </div>
+        <div class="hero-text">
+          <p class="eyebrow">${esc(p.range)} · ${esc(p.country)}</p>
+          <h1>${esc(p.name)}</h1>
+          <p class="detail">${fmt.format(p.ele)} metres · ${fmt.format(toFeet(p.ele))} feet</p>
+          <a class="cta" href="${mapPath(p)}">Open the live map →</a>
+        </div>
+      </header>
+
+      <dl class="facts">
+        <div><dt>Elevation</dt><dd>${fmt.format(p.ele)} m<small>${fmt.format(toFeet(p.ele))} ft</small></dd></div>
+        <div><dt>Range</dt><dd>${esc(p.range)}</dd></div>
+        <div><dt>Country</dt><dd>${esc(p.country)}</dd></div>
+        <div><dt>Coordinates</dt><dd>${dms(p.lat, 'N', 'S')}<small>${dms(p.lon, 'E', 'W')} · ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</small></dd></div>
+        <div><dt>In this index</dt><dd>${ordinal(rank)} highest<small>of ${PEAKS.length} summits</small></dd></div>
+      </dl>
+
+      <section class="prose">
+        <p>${esc(p.name)} stands ${fmt.format(p.ele)} metres above the sea, in the ${esc(p.range)} of ${esc(p.country)}:
+        the ${ordinal(rank)} highest of the ${PEAKS.length} summits in this index. Its nearest neighbour here is
+        <a href="${peakPath(closest)}">${esc(closest.name)}</a>, ${km(closest)} km to the ${bearing(p, closest)}.</p>
+        <p>Topography draws it the way it draws everything: contour lines every 50 metres, coloured from teal
+        valleys to a gold summit, with water, borders and names, and nothing else. No satellite imagery, no
+        shaded relief, no zoom slider. A handful of fixed scales, and the lines.</p>
+        <p><a href="${mapPath(p)}">Walk the contours of ${esc(p.name)} on the live map</a>, or
+        <a href="/">search anywhere on Earth</a>.</p>
+      </section>
+${
+  peers.length > 1
+    ? `
+      <h2>In the ${esc(p.range)}</h2>
+      <ol class="list">${peers.map((q) => summitRow(q, max, p)).join('')}
+      </ol>`
+    : ''
+}
+
+      <h2>Nearby</h2>
+      <ul class="near">${near
+        .map(
+          (q) => `
+        <li><a href="${peakPath(q)}"><span class="name">${esc(q.name)}</span>
+          <span class="dist">${km(q)} km ${bearing(p, q)} · ${fmt.format(q.ele)} m</span></a></li>`,
+        )
+        .join('')}
+      </ul>
+
+      <p style="margin-top: 56px"><a class="cta" href="${mapPath(p)}">Open ${esc(p.name)} on the live map →</a></p>`;
+
+  return shell({ page, site, stylesheet, favicon, version, current: p, body });
 }
 
 export function sitemap(site: string, hasImage: (p: Peak) => boolean): string {

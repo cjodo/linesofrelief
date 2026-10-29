@@ -27,7 +27,7 @@ const pages = [
   ...(ONLY.length ? [] : [{ key: 'home', path: '/' }]),
   ...PEAKS.filter((p) => !ONLY.length || ONLY.includes(p.slug)).map((p) => ({
     key: p.slug,
-    path: `/mountains/${p.slug}/`,
+    path: `/mountains/${p.slug}/map/`,
   })),
 ];
 

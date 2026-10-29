@@ -7,12 +7,14 @@ import {
   headTags,
   htmlAttrs,
   hubHtml,
+  mapPath,
   peakPage,
   peakPath,
   PRERENDER,
   prerenderHtml,
   rootPage,
   sitemap,
+  summaryHtml,
   type Page,
 } from './site/pages';
 import { PEAKS, type Peak } from './site/peaks';
@@ -23,7 +25,8 @@ import { PEAKS, type Peak } from './site/peaks';
 // sitemap invalid).
 const SITE_URL = (process.env.SITE_URL || 'https://linesofrelief.ink').replace(/\/+$/, '');
 
-const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?)?$/;
+/** /mountains/, /mountains/<slug>/ (summary) and /mountains/<slug>/map/ (live map). */
+const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?(map\/?)?)?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
 
 const hasPrerender = (key: string) =>
@@ -31,7 +34,9 @@ const hasPrerender = (key: string) =>
     existsSync(resolve(__dirname, 'public/prerender', `${key}-${size}.webp`)),
   );
 const root = () => rootPage(SITE_URL, START, hasPrerender('home'));
-const summit = (p: Peak) => peakPage(p, SITE_URL, hasImage(p), hasPrerender(p.slug));
+const summit = (p: Peak) => peakPage(p, hasImage(p), hasPrerender(p.slug));
+const summary = (p: Peak, stylesheet: string, favicon: string) =>
+  summaryHtml(p, SITE_URL, stylesheet, favicon, publicVersion, hasImage(p), hasPrerender(p.slug));
 
 /** Short content hash of a file in public/, if it exists. */
 function publicVersion(path: string): string | undefined {
@@ -56,8 +61,9 @@ function render(html: string, page: Page): string {
 }
 
 /**
- * The map at /, a landing page per summit at /mountains/<slug>/ (the same app,
- * arriving at that summit), the /mountains/ index, robots.txt and sitemap.xml.
+ * The map at /; per summit a static summary at /mountains/<slug>/ and the live
+ * map arriving there at /mountains/<slug>/map/; the /mountains/ index,
+ * robots.txt and sitemap.xml.
  */
 function sitePages(): Plugin {
   return {
@@ -75,15 +81,15 @@ function sitePages(): Plugin {
         try {
           const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
           let html: string;
+          const favicon = faviconOf(template);
           if (match[1]) {
             const peak = PEAKS.find((p) => p.slug === match[1]);
             if (!peak) return next();
-            html = render(
-              await server.transformIndexHtml(req.url!, template),
-              summit(peak),
-            );
+            html = match[2]
+              ? render(await server.transformIndexHtml(req.url!, template), summit(peak))
+              : summary(peak, '/src/style.css', favicon);
           } else {
-            html = hubHtml(SITE_URL, '/src/style.css', faviconOf(template, publicVersion));
+            html = hubHtml(SITE_URL, '/src/style.css', favicon, publicVersion);
           }
           res.setHeader('Content-Type', 'text/html');
           res.end(html);
@@ -100,16 +106,21 @@ function sitePages(): Plugin {
         if (index?.type !== 'asset') return;
         const html = String(index.source);
 
+        const stylesheet = html.match(/<link rel="stylesheet"[^>]*href="([^"]+)"/)?.[1] ?? '';
+        const favicon = faviconOf(html);
         for (const p of PEAKS) {
           this.emitFile({
             type: 'asset',
             fileName: `${peakPath(p).slice(1)}index.html`,
+            source: summary(p, stylesheet, favicon),
+          });
+          this.emitFile({
+            type: 'asset',
+            fileName: `${mapPath(p).slice(1)}index.html`,
             source: render(html, summit(p)),
           });
         }
 
-        const stylesheet = html.match(/<link rel="stylesheet"[^>]*href="([^"]+)"/)?.[1] ?? '';
-        const favicon = faviconOf(html);
         this.emitFile({
           type: 'asset',
           fileName: 'mountains/index.html',
