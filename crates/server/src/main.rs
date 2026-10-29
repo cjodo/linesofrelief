@@ -229,7 +229,9 @@ async fn museums(State(app): State<Shared>, Path((z, x, file)): Path<(u32, u32, 
 
 /// Read the museums out of every z14 tile under (z, x, y). The big source
 /// tiles aren't kept; the small answer is. Any failed tile fails the answer,
-/// so a partial list is never cached.
+/// so a partial list is never cached. The fields are the OpenMapTiles poi
+/// layer's (https://openmaptiles.org/schema/#poi); README "Server API" has
+/// the response.
 async fn museums_in(app: &Shared, z: u32, x: u32, y: u32) -> Result<Vec<u8>, BoxError> {
     let k = 1 << (MUSEUM_SOURCE_ZOOM - z);
     let mut tiles = tokio::task::JoinSet::new();
