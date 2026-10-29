@@ -28,6 +28,8 @@ from mathutils import Vector
 
 LOVE = '#eb6f92'
 BASE = '#191724'
+# The model's edges, drawn as lines over the clay: Rosé Pine's subtle neutral.
+EDGE = '#908caa'
 SCENE = 'Landmarks'
 
 
@@ -547,12 +549,32 @@ def setup(sc, res):
     for attr, value in (('use_raytracing', True), ('use_shadows', True), ('shadow_ray_count', 2), ('shadow_step_count', 8)):
         if hasattr(sc.eevee, attr):
             setattr(sc.eevee, attr, value)
+    edges(sc)
     world = sc.world or bpy.data.worlds.new('Landmarks')
     sc.world = world
     world.use_nodes = True
     bg = next(n for n in world.node_tree.nodes if n.type == 'BACKGROUND')
     bg.inputs['Color'].default_value = linear('#6e6a86')
     bg.inputs['Strength'].default_value = SKY
+
+
+def edges(sc):
+    """Freestyle lines along the model's outline and creases (not smooth curves, not the ground)."""
+    sc.render.use_freestyle = True
+    sc.render.line_thickness_mode = 'ABSOLUTE'
+    sc.render.line_thickness = sc.render.resolution_percentage / 100
+    fs = sc.view_layers[0].freestyle_settings
+    fs.crease_angle = math.radians(140)
+    ls = fs.linesets[0] if len(fs.linesets) else fs.linesets.new('Edges')
+    ls.select_by_visibility = True
+    ls.visibility = 'VISIBLE'
+    ls.select_by_edge_types = True
+    ls.select_silhouette = ls.select_border = ls.select_crease = True
+    ls.select_by_collection = True
+    ls.collection = COL
+    ls.linestyle.color = linear(EDGE)[:3]
+    ls.linestyle.thickness = 1.2
+    ls.linestyle.alpha = 0.9
 
 
 def light(sc, azimuth):
@@ -614,6 +636,9 @@ def build(slug):
     size = max(sc.camera.location.length, 1000) * 3
     ground = mesh('Ground', [(-size, -size, lo.z), (size, -size, lo.z), (size, size, lo.z), (-size, size, lo.z)], [(0, 1, 2, 3)])
     ground.data.materials[0] = shadow_ground()
+    # Outside the landmark's collection, so it draws no lines.
+    COL.objects.unlink(ground)
+    sc.collection.objects.link(ground)
     return sc
 
 
