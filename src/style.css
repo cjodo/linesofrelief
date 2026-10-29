@@ -2041,3 +2041,14 @@ body:not(.loaded) .locator {
     display: none;
   }
 }
+
+/* The smallest phones: a little less air in the top bar, so Landmarks fits too. */
+@media (max-width: 400px) {
+  .nav {
+    gap: 7px;
+  }
+  .nav a,
+  .favs summary {
+    letter-spacing: 0.06em;
+  }
+}

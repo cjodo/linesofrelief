@@ -9,7 +9,7 @@ summit, lake or town. Towns with museums wear a small badge; hover it for the
 list. That's it.
 
 **Contents:** [The opinions](#the-opinions) · [How it works](#how-it-works) ·
-[Server API](#server-api) · [Favourites](#favourites) · [Run it](#run-it) ·
+[Server API](#server-api) · [Favourites](#favourites) · [Landmarks](#landmarks) · [Run it](#run-it) ·
 [Make targets](#make-targets) · [Deploy](#deploy) · [Layout](#layout) ·
 [Data and credits](#data-and-credits)
 
@@ -102,6 +102,29 @@ a favourite fetches that one file (about 0.5 MB compressed) instead of about 85 
 and skips decoding and contour tracing entirely. Pan off its edge, or change
 the zoom, and the map carries on live.
 
+## Landmarks
+
+`site/landmarks.ts` lists a handful of famous buildings. Each wears a small
+diamond in love (Rosé Pine's red) on the map; click it for its page at
+`/landmarks/<slug>/`, where it stands as a clay render in the same red.
+
+The renders come from `scripts/landmarks.py`, which models each building in
+Blender from simple shapes at roughly true size and renders it with EEVEE on a
+transparent ground that keeps only its shadow. `make landmarks` writes
+`public/landmarks/<slug>.webp` and the share image
+`public/og/landmarks/<slug>.jpg`. It runs one Blender per landmark, so
+memory stays low. `LANDMARKS_PERCENT=30` renders small previews and skips the
+share images.
+
+Each landmark's page also shows it on a site model: its neighbourhood within
+a few hundred metres, with buildings and water from the same OpenFreeMap tiles
+the map draws (raised to their `render_height`) and the ground from the
+terrain tiles, in Rosé Pine's neutrals with the water in pine. `make
+landmark-sites` fetches them through the server into `.cache/landmarks/`, and
+`make landmarks` then renders `public/landmarks/<slug>-site.webp` too. The
+site model appears on the landmark's page only, not in the index or its share
+image.
+
 ## Run it
 
 You need Node 22+, and Rust if you change the kernel or the server.
@@ -136,6 +159,8 @@ docker run -p 8080:8080 -e PORT=8080 -e REDIS_URL=redis://host:6379 topography
 | `make og` | Render share images (`public/og*.jpg`). |
 | `make prerender` | Render the pre-rendered first frames (`public/prerender/*.webp`). |
 | `make favorites` | Pre-build every place in `site/favorites.ts` into `public/favorites/*.bin`. |
+| `make landmark-sites` | Fetch each landmark's neighbourhood for its site model (`.cache/landmarks/`). |
+| `make landmarks` | Render the landmarks in Blender (`public/landmarks/*.webp`, `public/og/landmarks/*.jpg`), and on their site models. |
 | `make globe` | Pre-render the world texture for the spinning globe on `/why/` (`public/globe.png`). |
 
 `og` and `prerender` drive a headless Chromium. Set `CHROMIUM=/path/to/chrome`

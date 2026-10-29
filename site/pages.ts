@@ -4,6 +4,7 @@
  * /mountains/ index and /why/. Imported by vite.config.ts only.
  */
 import { FAVORITES } from './favorites.ts';
+import { LANDMARKS, landmarkImage, landmarkPath, landmarkRender, landmarkSiteRender, type Landmark } from './landmarks.ts';
 import { detailOf, PEAKS, type Peak } from './peaks.ts';
 import { WHY } from './why.ts';
 
@@ -502,6 +503,44 @@ const PAGE_CSS = `
         .why-globe canvas { width: min(100%, 460px); }
         .why-text { grid-column: 1; grid-row: 1; }
       }
+      /* A landmark: its clay render standing on the page, glowing faintly, and
+         beside it (below, on phones) its site model. Each takes width in
+         proportion to its shape (--ar), so the two stand the same height.
+         The row runs nearly edge to edge: wide, sharp screens show them large. */
+      .page { --bleed: calc(50% - 50vw + max(16px, 2.5vw)); }
+      .renders {
+        display: flex; gap: max(24px, 2vw); align-items: flex-end;
+        margin: 24px var(--bleed) 0;
+      }
+      .renders figure { flex: var(--ar, 1) 1 0; min-width: 0; margin: 0; display: grid; justify-items: center; }
+      .renders img { display: block; width: 100%; height: auto; max-height: 86vh; object-fit: contain; }
+      .renders-caption {
+        margin: 10px var(--bleed) 0; text-align: right;
+        font: 400 0.6rem/1.6 var(--mono); letter-spacing: 0.08em; color: var(--muted);
+      }
+      @media (max-width: 700px) {
+        .renders { flex-direction: column; align-items: stretch; }
+        .renders-caption { text-align: left; }
+      }
+      .render { position: relative; }
+      .render::before {
+        content: ''; position: absolute; inset: 12% 18% 6%; pointer-events: none; filter: blur(60px);
+        background: radial-gradient(closest-side, color-mix(in srgb, var(--love) 22%, transparent), transparent);
+      }
+      .render img { position: relative; }
+      .landmark-text { margin-top: 8px; }
+      .landmark-text h1 { color: var(--love); }
+      .landmark-text .cta { border-color: color-mix(in srgb, var(--love) 45%, var(--overlay)); }
+      .landmark-text .cta:hover, .landmark-text .cta:focus-visible { color: var(--love); border-color: var(--love); }
+      .near.landmarks li a:hover .name { color: var(--love); }
+      /* /landmarks/: the renders in a grid, each a link to its page. */
+      .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 0; margin: 56px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--overlay); }
+      .gallery a { display: grid; gap: 6px; padding: 24px 12px 22px; border-bottom: 1px solid var(--overlay); text-decoration: none; }
+      .gallery img { display: block; width: 100%; height: 240px; object-fit: contain; transition: transform 0.3s; }
+      .gallery a:hover img, .gallery a:focus-visible img { transform: translateY(-4px); }
+      .gallery .name { margin-top: 10px; font: italic 400 1.6rem/1.05 var(--serif); transition: color 0.2s; }
+      .gallery a:hover .name, .gallery a:focus-visible .name { color: var(--love); }
+      .gallery .where { font: 400 0.62rem/1.4 var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
       .near { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--overlay); }
       .near li a {
         display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
@@ -524,13 +563,16 @@ interface Shell {
   stylesheet: string;
   favicon: string;
   version?: (path: string) => string | undefined;
-  /** The nav's current item: the index, /why/, or a summit (with a link to its map). */
-  current: 'summits' | 'why' | Peak;
+  /** The nav's current item: the index, /why/, a landmark, or a summit (with a link to its map). */
+  current: 'summits' | 'landmarks' | 'why' | 'landmark' | Peak;
+  /** Where "Live map" goes, when it isn't a summit's own map. */
+  live?: { href: string; name: string };
   body: string;
 }
 
-function shell({ page, site, stylesheet, favicon, version, current, body }: Shell): string {
+function shell({ page, site, stylesheet, favicon, version, current, live, body }: Shell): string {
   const summit = typeof current === 'string' ? null : current;
+  const map = summit ? { href: mapPath(summit), name: summit.name } : live;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -555,16 +597,18 @@ ${analyticsHtml()}
       <nav class="nav" aria-label="Site">
         <a class="brand" href="/">Topography</a>
         <a href="/mountains/"${current === 'summits' ? ' aria-current="page"' : ''}>Summits</a>
+        <a href="/landmarks/"${current === 'landmarks' ? ' aria-current="page"' : ''}>Landmarks</a>
         <a href="/why/"${current === 'why' ? ' aria-current="page"' : ''}>Why</a>
         ${favoritesNav()}
-        ${summit ? `<a href="${mapPath(summit)}">Live map</a>` : ''}
+        ${map ? `<a href="${esc(map.href)}">Live map</a>` : ''}
       </nav>
 ${body}
       <footer>
         <a href="/">Search the whole world →</a>
         <a href="/mountains/">All summits</a>
+        <a href="/landmarks/">All landmarks</a>
         <a href="/why/">Why this map</a>
-        ${summit ? `<a href="${mapPath(summit)}">${esc(summit.name)} on the live map</a>` : ''}
+        ${map ? `<a href="${esc(map.href)}">${esc(map.name)} on the live map</a>` : ''}
         <a href="#" class="consent-link" data-consent>Cookies</a>
         <span class="credits">${CREDITS}</span>
       </footer>
@@ -776,16 +820,197 @@ ${
   return shell({ page, site, stylesheet, favicon, version, current: p, body });
 }
 
+// --- Landmarks ----------------------------------------------------------------
+
+export function landmarksHubPage(site: string): Page {
+  return {
+    path: '/landmarks/',
+    title: `Landmarks · ${SITE_NAME}`,
+    description:
+      `${LANDMARKS.length} famous buildings, from the Great Pyramid to the Burj Khalifa, modelled in clay ` +
+      'in Rosé Pine red, each with the ground it stands on as a contour map.',
+    image: landmarkImage(LANDMARKS[0]),
+    imageAlt: 'Clay models of famous buildings, rendered in Rosé Pine red on a dark background',
+    jsonLd: [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        name: 'Landmarks',
+        itemListElement: LANDMARKS.map((l, i) => ({
+          '@type': 'ListItem',
+          position: i + 1,
+          url: `${site}${landmarkPath(l)}`,
+          name: l.name,
+        })),
+      },
+    ],
+  };
+}
+
+/** The /landmarks/ index: every render, each a link to its page. */
+export function landmarksHubHtml(
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version?: (path: string) => string | undefined,
+): string {
+  const page = landmarksHubPage(site);
+  const cards = LANDMARKS.map((l) => {
+    const v = version?.(landmarkRender(l));
+    return `
+        <li>
+          <a href="${landmarkPath(l)}">
+            <img src="${landmarkRender(l)}${v ? `?v=${v}` : ''}" alt="" loading="lazy" />
+            <span class="name">${esc(l.name)}</span>
+            <span class="where">${esc(l.city)} · ${esc(l.country)} · ${fmt.format(l.height)} m</span>
+          </a>
+        </li>`;
+  }).join('');
+  return shell({
+    page,
+    site,
+    stylesheet,
+    favicon,
+    version,
+    current: 'landmarks',
+    body: `      <h1>Landmarks</h1>
+      <p class="lede">${esc(page.description)}</p>
+      <ul class="gallery">${cards}
+      </ul>`,
+  });
+}
+
+/** Where a landmark's "live map" link arrives: the map, at the closest scale. */
+export const landmarkMap = (l: Landmark) =>
+  `/?${new URLSearchParams({ name: l.name, lat: String(l.lat), lon: String(l.lon), z: '13' })}`;
+
+const landmarkDescription = (l: Landmark) =>
+  `${l.name}, ${l.city}, ${l.country}: ${fmt.format(l.height)} m, ${l.built}. A clay render in Rosé Pine, ` +
+  'and the ground it stands on drawn as contour lines.';
+
+export function landmarkPage(l: Landmark, site: string): Page {
+  const url = `${site}${landmarkPath(l)}`;
+  const description = landmarkDescription(l);
+  return {
+    path: landmarkPath(l),
+    title: `${l.name} · ${l.city} · ${SITE_NAME}`,
+    description,
+    image: landmarkImage(l),
+    imageAlt: `A clay model of the ${l.name}, rendered in Rosé Pine red on a dark background`,
+    jsonLd: [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'LandmarksOrHistoricalBuildings',
+        name: l.name,
+        description,
+        url,
+        image: `${site}${landmarkImage(l)}`,
+        geo: { '@type': 'GeoCoordinates', latitude: l.lat, longitude: l.lon },
+        address: { '@type': 'PostalAddress', addressLocality: l.city, addressCountry: l.country },
+      },
+    ],
+  };
+}
+
+/** A landmark's page: its render, a few facts, and the way to its ground on the map. */
+export function landmarkHtml(
+  l: Landmark,
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version?: (path: string) => string | undefined,
+  /** A public image's pixel size, when it exists. */
+  size?: (path: string) => { width: number; height: number } | undefined,
+): string {
+  const page = landmarkPage(l, site);
+  const others = LANDMARKS.filter((o) => o !== l);
+  const v = version?.(landmarkRender(l));
+  // The site model shows on its page only (not the index, not the share image), once rendered.
+  const siteV = version?.(landmarkSiteRender(l));
+  /** An image in the row: its intrinsic size, and its share of the width by its shape. */
+  const figure = (cls: string, path: string, hash: string | undefined, attrs: string) => {
+    const s = size?.(path);
+    const dims = s ? ` width="${s.width}" height="${s.height}"` : '';
+    const ar = s ? ` style="--ar: ${(s.width / s.height).toFixed(3)}"` : '';
+    return `<figure class="${cls}"${ar}>
+          <img src="${path}${hash ? `?v=${hash}` : ''}"${dims} ${attrs} />
+        </figure>`;
+  };
+  const body = `      <header>
+        <div class="renders">
+        ${figure('render', landmarkRender(l), v, `alt="${esc(page.imageAlt)}" fetchpriority="high"`)}${
+          siteV
+            ? `
+        ${figure(
+          'site',
+          landmarkSiteRender(l),
+          siteV,
+          `alt="A site model of the ${esc(l.name)} in its neighbourhood: the landmark in Rosé Pine red among grey buildings, with its water in blue"`,
+        )}`
+            : ''
+        }
+        </div>${
+          siteV
+            ? `
+        <p class="renders-caption">Beside it, its neighbourhood: buildings and water from OpenStreetMap, the ground from the map's terrain tiles.</p>`
+            : ''
+        }
+        <div class="hero-text landmark-text">
+          <p class="eyebrow">${esc(l.city)} · ${esc(l.country)}</p>
+          <h1>${esc(l.name)}</h1>
+          <p class="detail">${fmt.format(l.height)} metres · ${fmt.format(toFeet(l.height))} feet</p>
+          <a class="cta" href="${esc(landmarkMap(l))}">See its ground on the live map →</a>
+        </div>
+      </header>
+
+      <dl class="facts">
+        <div><dt>Height</dt><dd>${fmt.format(l.height)} m<small>${fmt.format(toFeet(l.height))} ft</small></dd></div>
+        <div><dt>Completed</dt><dd>${esc(l.built)}</dd></div>
+        <div><dt>By</dt><dd>${esc(l.by)}</dd></div>
+        <div><dt>Coordinates</dt><dd>${dms(l.lat, 'N', 'S')}<small>${dms(l.lon, 'E', 'W')} · ${l.lat.toFixed(4)}, ${l.lon.toFixed(4)}</small></dd></div>
+      </dl>
+
+      <section class="prose">
+        <p>${esc(l.about)}</p>
+        <p>Modelled from simple shapes at roughly its true size, and rendered in clay. The map draws
+        the rest the one way it draws everything: <a href="${esc(landmarkMap(l))}">the ground under
+        ${esc(l.city)}</a>, as contour lines coloured by height, with its water and its names.</p>
+      </section>
+
+      <h2>Other landmarks</h2>
+      <ul class="near landmarks">${others
+        .map(
+          (o) => `
+        <li><a href="${landmarkPath(o)}"><span class="name">${esc(o.name)}</span>
+          <span class="dist">${esc(o.city)} · ${fmt.format(o.height)} m</span></a></li>`,
+        )
+        .join('')}
+      </ul>`;
+
+  return shell({
+    page,
+    site,
+    stylesheet,
+    favicon,
+    version,
+    current: 'landmark',
+    live: { href: landmarkMap(l), name: l.name },
+    body,
+  });
+}
+
 export function sitemap(site: string, hasImage: (p: Peak) => boolean): string {
   const today = new Date().toISOString().slice(0, 10);
   const urls: { loc: string; image?: string }[] = [
     { loc: `${site}/`, image: `${site}/og.jpg` },
     { loc: `${site}/mountains/` },
+    { loc: `${site}/landmarks/` },
     { loc: `${site}/why/` },
     ...PEAKS.map((p) => ({
       loc: `${site}${peakPath(p)}`,
       image: hasImage(p) ? `${site}/og/${p.slug}.jpg` : undefined,
     })),
+    ...LANDMARKS.map((l) => ({ loc: `${site}${landmarkPath(l)}`, image: `${site}${landmarkImage(l)}` })),
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">

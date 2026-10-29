@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+# Fetched for the landmarks' site models (make landmark-sites)
+.cache/
 *.tsbuildinfo
 .vite/
 

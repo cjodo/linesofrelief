@@ -9,6 +9,8 @@ import {
   analyticsHtml,
   favoritesNav,
   hubHtml,
+  landmarkHtml,
+  landmarksHubHtml,
   mapPath,
   peakPage,
   peakPath,
@@ -21,6 +23,7 @@ import {
   whyHtml,
   type Page,
 } from './site/pages';
+import { LANDMARKS, landmarkPath } from './site/landmarks';
 import { PEAKS, type Peak } from './site/peaks';
 
 /** Public origin of the site; override with SITE_URL=https://… at build time. */
@@ -44,6 +47,8 @@ useAnalytics(TAG_OK ? TAG_ID : '');
 
 const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?(map\/?)?)?$/;
 const WHY_ROUTE = /^\/why\/?$/;
+const LANDMARK_ROUTE = /^\/landmarks\/([a-z0-9-]+)\/?$/;
+const LANDMARKS_ROUTE = /^\/landmarks\/?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
 
 const hasPrerender = (key: string) =>
@@ -60,6 +65,22 @@ function publicVersion(path: string): string | undefined {
   const file = resolve(__dirname, 'public', path.replace(/^\//, ''));
   if (!existsSync(file)) return undefined;
   return createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 10);
+}
+
+/** A WebP's pixel size, from its header (lossy VP8, lossless VP8L or extended VP8X). */
+function publicSize(path: string): { width: number; height: number } | undefined {
+  const file = resolve(__dirname, 'public', path.replace(/^\//, ''));
+  if (!existsSync(file)) return undefined;
+  const b = readFileSync(file);
+  if (b.toString('ascii', 0, 4) !== 'RIFF' || b.toString('ascii', 8, 12) !== 'WEBP') return undefined;
+  const chunk = b.toString('ascii', 12, 16);
+  if (chunk === 'VP8X') return { width: 1 + b.readUIntLE(24, 3), height: 1 + b.readUIntLE(27, 3) };
+  if (chunk === 'VP8 ') return { width: b.readUInt16LE(26) & 0x3fff, height: b.readUInt16LE(28) & 0x3fff };
+  if (chunk === 'VP8L') {
+    const bits = b.readUInt32LE(21);
+    return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >> 14) & 0x3fff) };
+  }
+  return undefined;
 }
 
 const hasImage = (p: Peak) => existsSync(resolve(__dirname, 'public/og', `${p.slug}.jpg`));
@@ -108,7 +129,7 @@ function sitePages(): Plugin {
       order: 'pre',
       handler: (html) => render(html, root()),
     },
-    // Dev has no generated files, so render /mountains/, its summits and /why/ on request.
+    // Dev has no generated files, so render /mountains/, its summits, the landmarks and /why/ on request.
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const path = (req.url ?? '').split('?')[0];
@@ -116,6 +137,19 @@ function sitePages(): Plugin {
           const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
           res.setHeader('Content-Type', 'text/html');
           res.end(whyHtml(SITE_URL, '/src/style.css', faviconOf(template), `/${GLOBE_ENTRY}`, publicVersion));
+          return;
+        }
+        if (LANDMARKS_ROUTE.test(path)) {
+          const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
+          res.setHeader('Content-Type', 'text/html');
+          res.end(landmarksHubHtml(SITE_URL, '/src/style.css', faviconOf(template), publicVersion));
+          return;
+        }
+        const landmark = LANDMARKS.find((l) => l.slug === path.match(LANDMARK_ROUTE)?.[1]);
+        if (landmark) {
+          const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
+          res.setHeader('Content-Type', 'text/html');
+          res.end(landmarkHtml(landmark, SITE_URL, '/src/style.css', faviconOf(template), publicVersion, publicSize));
           return;
         }
         const match = path.match(ROUTE);
@@ -160,6 +194,19 @@ function sitePages(): Plugin {
             type: 'asset',
             fileName: `${mapPath(p).slice(1)}index.html`,
             source: render(html, summit(p)),
+          });
+        }
+
+        this.emitFile({
+          type: 'asset',
+          fileName: 'landmarks/index.html',
+          source: landmarksHubHtml(SITE_URL, stylesheet, favicon, publicVersion),
+        });
+        for (const l of LANDMARKS) {
+          this.emitFile({
+            type: 'asset',
+            fileName: `${landmarkPath(l).slice(1)}index.html`,
+            source: landmarkHtml(l, SITE_URL, stylesheet, favicon, publicVersion, publicSize),
           });
         }
 
