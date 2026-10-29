@@ -1,14 +1,20 @@
 /**
- * Custom Google Analytics events. A no-op unless the build embedded a GA4 tag
- * (GA_ID set), so local builds and forks send nothing.
+ * Custom analytics events. A no-op unless the build embedded a Google tag, so
+ * dev builds and forks send nothing. With Tag Manager they're dataLayer events
+ * (trigger on their names); with a GA4 tag, gtag events.
  */
+
+type Params = Record<string, string | number>;
 
 declare global {
   interface Window {
-    gtag?: (command: 'event', name: string, params?: Record<string, string | number>) => void;
+    topoAnalytics?: 'gtm';
+    dataLayer?: unknown[];
+    gtag?: (command: 'event', name: string, params?: Params) => void;
   }
 }
 
-export function track(name: string, params?: Record<string, string | number>) {
-  window.gtag?.('event', name, params);
+export function track(name: string, params: Params = {}) {
+  if (window.topoAnalytics === 'gtm') window.dataLayer?.push({ event: name, ...params });
+  else window.gtag?.('event', name, params);
 }

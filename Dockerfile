@@ -10,7 +10,7 @@ COPY . .
 # Public origin for canonical / share-image URLs, e.g. --build-arg SITE_URL=https://example.com
 ARG SITE_URL
 ENV SITE_URL=${SITE_URL}
-# Google Analytics (GA4) measurement ID, e.g. G-XXXXXXXXXX; unset = no analytics.
+# Google tag override (GTM-… or G-…; "off" to disable). Unset: the site's own container.
 ARG GA_ID
 ENV GA_ID=${GA_ID}
 RUN npm run build

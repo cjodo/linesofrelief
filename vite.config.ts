@@ -29,12 +29,17 @@ import { PEAKS, type Peak } from './site/peaks';
 const SITE_URL = (process.env.SITE_URL || 'https://linesofrelief.ink').replace(/\/+$/, '');
 
 /** /mountains/, /mountains/<slug>/ (summary) and /mountains/<slug>/map/ (live map). */
-/** Google Analytics (GA4) measurement ID; unset or malformed means no analytics at all. */
-const GA_ID = process.env.GA_ID?.trim() ?? '';
-if (GA_ID && !/^G-[A-Z0-9]+$/.test(GA_ID)) {
-  console.warn(`GA_ID "${GA_ID}" isn't a GA4 measurement ID (G-XXXXXXXXXX); analytics left out.`);
+/**
+ * The site's Google tag: Tag Manager container (GTM-…) or GA4 ID (G-…).
+ * GA_ID overrides it (`off` disables); production builds only, never dev.
+ */
+const DEFAULT_TAG = 'GTM-T9ZSQXZK';
+const TAG_ID = (process.env.GA_ID?.trim() || DEFAULT_TAG).toUpperCase();
+const TAG_OK = /^(GTM|G)-[A-Z0-9]+$/.test(TAG_ID);
+if (TAG_ID !== 'OFF' && !TAG_OK) {
+  console.warn(`GA_ID "${TAG_ID}" isn't a Google tag ID (GTM-… or G-…); analytics left out.`);
 }
-useAnalytics(/^G-[A-Z0-9]+$/.test(GA_ID) ? GA_ID : '');
+useAnalytics(TAG_OK ? TAG_ID : '');
 
 const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?(map\/?)?)?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
@@ -80,6 +85,10 @@ function render(html: string, page: Page): string {
 function sitePages(): Plugin {
   return {
     name: 'site-pages',
+    // The dev server never sends analytics.
+    config(_, { command }) {
+      if (command === 'serve') useAnalytics('');
+    },
     // 'pre' so the dev server serves a filled-in root page too.
     transformIndexHtml: {
       order: 'pre',

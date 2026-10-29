@@ -264,29 +264,37 @@ export function htmlAttrs(page: Page): string {
 
 // --- Analytics -------------------------------------------------------------
 
-let gaId = '';
-/** Embed Google Analytics (GA4) in every page; '' leaves it out entirely. */
+let tagId = '';
+/**
+ * Embed a Google tag in every page: a Tag Manager container (GTM-…) or a GA4
+ * measurement ID (G-…); '' leaves it out entirely.
+ */
 export function useAnalytics(id: string) {
-  gaId = id;
+  tagId = id;
 }
 
 /**
- * The GA4 tag, loaded 1.5 s after the page has loaded so its ~90 KB never
- * delays the first paint or the map. History changes (searches, favourites)
- * are page views through GA4's enhanced measurement.
+ * The Google tag, loaded 1.5 s after the page has loaded so its script never
+ * delays the first paint or the map (events queue in dataLayer until then).
+ * History changes (searches, favourites) are page views through GA4's
+ * enhanced measurement.
  */
 export function analyticsHtml(): string {
-  if (!gaId) return '';
+  if (!tagId) return '';
+  const gtm = tagId.startsWith('GTM-');
+  const src = gtm
+    ? `https://www.googletagmanager.com/gtm.js?id=${tagId}`
+    : `https://www.googletagmanager.com/gtag/js?id=${tagId}`;
   return `    <script>
       window.dataLayer = window.dataLayer || [];
       function gtag() { dataLayer.push(arguments); }
       gtag('js', new Date());
-      gtag('config', '${gaId}');
+      ${gtm ? "window.topoAnalytics = 'gtm';" : `gtag('config', '${tagId}');`}
       addEventListener('load', function () {
         setTimeout(function () {
           var s = document.createElement('script');
           s.async = true;
-          s.src = 'https://www.googletagmanager.com/gtag/js?id=${gaId}';
+          s.src = '${src}';
           document.head.appendChild(s);
         }, 1500);
       });
