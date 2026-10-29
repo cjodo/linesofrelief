@@ -262,6 +262,37 @@ export function htmlAttrs(page: Page): string {
     .join('');
 }
 
+// --- Analytics -------------------------------------------------------------
+
+let gaId = '';
+/** Embed Google Analytics (GA4) in every page; '' leaves it out entirely. */
+export function useAnalytics(id: string) {
+  gaId = id;
+}
+
+/**
+ * The GA4 tag, loaded 1.5 s after the page has loaded so its ~90 KB never
+ * delays the first paint or the map. History changes (searches, favourites)
+ * are page views through GA4's enhanced measurement.
+ */
+export function analyticsHtml(): string {
+  if (!gaId) return '';
+  return `    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag('js', new Date());
+      gtag('config', '${gaId}');
+      addEventListener('load', function () {
+        setTimeout(function () {
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=${gaId}';
+          document.head.appendChild(s);
+        }, 1500);
+      });
+    </script>`;
+}
+
 /**
  * The creator's favourites in the nav: a native disclosure, so it works without
  * script; on the map, picking one arrives there without a reload.
@@ -392,6 +423,7 @@ ${headTags(page, site, version)}
       } catch (e) {}
     </script>
     <style>${PAGE_CSS}    </style>
+${analyticsHtml()}
   </head>
   <body>
     <main class="page">

@@ -1,4 +1,5 @@
 import { INK, MONO, SERIF } from './config';
+import { track } from './analytics';
 import { draw, type Scene } from './render';
 
 /**
@@ -110,6 +111,7 @@ export function createExport(button: HTMLButtonElement, current: () => View | nu
         const where = `${view.lat.toFixed(4)}_${view.lon.toFixed(4)}`;
         a.download = `topography-${view.name ? `${slug(view.name)}-` : ''}${where}.png`;
         a.click();
+        track('export_png');
         setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
       }, 'image/png');
     });

@@ -79,6 +79,7 @@ docker run -p 8080:8080 -e PORT=8080 -e REDIS_URL=redis://host:6379 topography
 | `REDIS_URL` | `redis://127.0.0.1:6379` | The shared cache. Optional. |
 | `STATIC_DIR` | `dist` | What the server serves. |
 | `SITE_URL` | `https://linesofrelief.ink` | Public origin, used for canonical links, share images and the sitemap. Set it at build time when deploying elsewhere. |
+| `GA_ID` | unset | Google Analytics (GA4) measurement ID, set at build time. Unset means no analytics. |
 | `API_ORIGIN` | `http://localhost:8080` | Where Vite's dev server proxies `/tiles` and `/api`. |
 
 ## Make targets

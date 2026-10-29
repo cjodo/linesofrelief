@@ -6,6 +6,7 @@ import { START } from './src/config';
 import {
   headTags,
   htmlAttrs,
+  analyticsHtml,
   favoritesNav,
   hubHtml,
   mapPath,
@@ -16,6 +17,7 @@ import {
   rootPage,
   sitemap,
   summaryHtml,
+  useAnalytics,
   type Page,
 } from './site/pages';
 import { PEAKS, type Peak } from './site/peaks';
@@ -27,6 +29,13 @@ import { PEAKS, type Peak } from './site/peaks';
 const SITE_URL = (process.env.SITE_URL || 'https://linesofrelief.ink').replace(/\/+$/, '');
 
 /** /mountains/, /mountains/<slug>/ (summary) and /mountains/<slug>/map/ (live map). */
+/** Google Analytics (GA4) measurement ID; unset or malformed means no analytics at all. */
+const GA_ID = process.env.GA_ID?.trim() ?? '';
+if (GA_ID && !/^G-[A-Z0-9]+$/.test(GA_ID)) {
+  console.warn(`GA_ID "${GA_ID}" isn't a GA4 measurement ID (G-XXXXXXXXXX); analytics left out.`);
+}
+useAnalytics(/^G-[A-Z0-9]+$/.test(GA_ID) ? GA_ID : '');
+
 const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?(map\/?)?)?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
 
@@ -59,6 +68,7 @@ function render(html: string, page: Page): string {
   out = region(out, 'about', page.about ?? '');
   out = region(out, 'prerender', prerenderHtml(page));
   out = region(out, 'favorites', favoritesNav());
+  out = region(out, 'analytics', analyticsHtml());
   return out.replace(/<html[^>]*>/, () => `<html lang="en"${htmlAttrs(page)}>`);
 }
 

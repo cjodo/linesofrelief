@@ -2,6 +2,8 @@
  * Share the current view: the native share sheet where there is one (phones),
  * otherwise copy the link.
  */
+import { track } from './analytics';
+
 export function createShare(button: HTMLButtonElement, current: () => { url: string; title: string }) {
   const toast = button.querySelector<HTMLElement>('.toast')!;
   let timer = 0;
@@ -17,6 +19,7 @@ export function createShare(button: HTMLButtonElement, current: () => { url: str
     const { url, title } = current();
     const touch = matchMedia('(hover: none)').matches;
     if (touch && navigator.share) {
+      track('share', { method: 'native' });
       try {
         await navigator.share({ title, url });
       } catch {
@@ -26,6 +29,7 @@ export function createShare(button: HTMLButtonElement, current: () => { url: str
     }
     try {
       await navigator.clipboard.writeText(url);
+      track('share', { method: 'copy' });
       say('Link copied');
     } catch {
       say('Copy the address bar');

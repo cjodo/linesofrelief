@@ -13,6 +13,7 @@ import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
+import { track } from './analytics';
 import { greet } from './banner';
 import { bundleUrl, decodeScene, favoriteFor, favoriteRequest } from './bundle';
 import type { Favorite } from '../site/favorites';
@@ -165,6 +166,7 @@ let cardsResumeAt = 0;
 function playCard(card: Parameters<typeof showCard>[0]) {
   cardsResumeAt = performance.now() + CARD_COOLDOWN_MS;
   showCard(card);
+  track('discovery', { kind: card.eyebrow, name: card.name });
 }
 const cardsPaused = () => performance.now() < cardsResumeAt;
 
@@ -671,6 +673,7 @@ function zoomTo(next: number, ax = w / 2, ay = h / 2) {
   arrival.y *= f;
   zoom = next;
   updateZoomControls();
+  track('zoom', { level: next });
   // The old scene stays as the stand-in; the in-flight request is for the old
   // zoom, so forget it and ask for this one.
   detailId = -1;
@@ -861,9 +864,10 @@ window.addEventListener(
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 window.addEventListener('resize', resize);
-createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) =>
-  arrive(place, { push: true, announce: true, keepZoom: true }),
-);
+createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) => {
+  track('search_select', { kind: place.kind, name: place.name });
+  arrive(place, { push: true, announce: true, keepZoom: true });
+});
 createShare(document.querySelector<HTMLButtonElement>('#share')!, () => {
   const link = currentLink();
   history.replaceState(null, '', link.url);
@@ -900,6 +904,7 @@ favs?.addEventListener('click', (e) => {
   if (!spot) return;
   e.preventDefault();
   favs.open = false;
+  track('favourite_open', { name: spot.name ?? '' });
   arrive(spot, { push: true, announce: true });
 });
 document.addEventListener('pointerdown', (e) => {
