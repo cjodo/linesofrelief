@@ -5,7 +5,7 @@ SERVER     := crates/server/target/release/topography-server
 SERVER_SRC := $(wildcard crates/server/src/*.rs) crates/server/Cargo.toml
 PORT       ?= 8080
 
-.PHONY: dev build serve server wasm og prerender verify clean
+.PHONY: dev build serve server wasm og prerender favorites verify clean
 
 # Start the server (next free port if $(PORT) is taken), wait until it has
 # written the port it bound, and leave it in $$port / its pid in $$pid.
@@ -52,6 +52,15 @@ og: build $(SERVER)
 ## prerender: render each page's first-frame map (public/prerender/*.webp), then rebuild
 prerender: build $(SERVER)
 	$(call with-server,scripts/prerender.ts)
+	$(MAKE) build
+
+## favorites: pre-build each place in site/favorites.ts into public/favorites/*.bin
+##            (optionally SLUGS="lake-louise"), then rebuild
+FAV_SCRIPT := node_modules/.cache/favorites.mjs
+favorites: build $(SERVER)
+	@npx esbuild scripts/favorites.ts --bundle --platform=node --format=esm \
+	  --outfile=$(FAV_SCRIPT) --log-level=warning
+	$(call with-server,$(FAV_SCRIPT))
 	$(MAKE) build
 
 ## verify: check summit coordinates in site/peaks.ts against the elevation tiles

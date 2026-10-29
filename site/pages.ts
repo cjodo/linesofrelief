@@ -3,6 +3,7 @@
  * summit at /mountains/<slug>/ (the same app, arriving at that summit), and
  * the /mountains/ index. Imported by vite.config.ts only.
  */
+import { FAVORITES } from './favorites.ts';
 import { detailOf, PEAKS, type Peak } from './peaks.ts';
 
 export interface Page {
@@ -261,6 +262,24 @@ export function htmlAttrs(page: Page): string {
     .join('');
 }
 
+/**
+ * The creator's favourites in the nav: a native disclosure, so it works without
+ * script; on the map, picking one arrives there without a reload.
+ */
+export function favoritesNav(): string {
+  const items = FAVORITES.map((f) => {
+    const q = new URLSearchParams({ name: f.name, lat: String(f.lat), lon: String(f.lon) });
+    return `<li><a href="/?${esc(q.toString())}" data-favorite>${esc(f.name)}</a></li>`;
+  }).join('');
+  return `<details class="favs">
+          <summary>Favourites</summary>
+          <div class="favs-panel">
+            <p>The creator's favourites</p>
+            <ul>${items}</ul>
+          </div>
+        </details>`;
+}
+
 // --- Static pages (index, summaries): no app script, the server only serves files
 
 /** Styles shared by the index and the summaries, on top of the site stylesheet. */
@@ -379,6 +398,7 @@ ${headTags(page, site, version)}
       <nav class="nav" aria-label="Site">
         <a class="brand" href="/">Topography</a>
         <a href="/mountains/"${summit ? '' : ' aria-current="page"'}>Summits</a>
+        ${favoritesNav()}
         ${summit ? `<a href="${mapPath(summit)}">Live map</a>` : ''}
       </nav>
 ${body}

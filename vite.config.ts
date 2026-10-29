@@ -6,6 +6,7 @@ import { START } from './src/config';
 import {
   headTags,
   htmlAttrs,
+  favoritesNav,
   hubHtml,
   mapPath,
   peakPage,
@@ -57,6 +58,7 @@ function render(html: string, page: Page): string {
   let out = region(html, 'seo', headTags(page, SITE_URL, publicVersion));
   out = region(out, 'about', page.about ?? '');
   out = region(out, 'prerender', prerenderHtml(page));
+  out = region(out, 'favorites', favoritesNav());
   return out.replace(/<html[^>]*>/, () => `<html lang="en"${htmlAttrs(page)}>`);
 }
 

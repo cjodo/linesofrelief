@@ -854,6 +854,75 @@ body:has(.search.searching) .loading-bar {
   color: var(--subtle);
 }
 
+/* --- Favourites: a disclosure in the nav ----------------------------------- */
+
+.favs {
+  position: relative;
+}
+.favs summary {
+  font: 400 0.72rem/1 var(--mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text);
+  list-style: none;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.favs summary::-webkit-details-marker {
+  display: none;
+}
+.favs summary::after {
+  content: ' ▾';
+  letter-spacing: 0;
+  color: var(--subtle);
+}
+.favs summary:hover,
+.favs summary:focus-visible,
+.favs[open] summary {
+  color: var(--rose);
+  outline: none;
+}
+.favs-panel {
+  position: absolute;
+  top: calc(100% + 14px);
+  left: -16px;
+  z-index: 6;
+  min-width: 15rem;
+  padding: 14px 0 8px;
+  border: 1px solid var(--overlay);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(12px);
+  text-shadow: none;
+}
+.favs-panel p {
+  margin: 0 16px 8px;
+  font: 400 0.6rem/1 var(--mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.favs-panel ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.favs-panel a {
+  display: block;
+  padding: 8px 16px;
+  font: italic 400 1.15rem/1.15 var(--serif);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  text-decoration: none;
+}
+.favs-panel a:hover,
+.favs-panel a:focus-visible {
+  background: var(--overlay);
+  color: var(--rose);
+  outline: none;
+}
+
 /* --- Text size: a segmented control, the one bit of chrome in the nav ----- */
 
 .textsize {
@@ -1138,6 +1207,16 @@ body:not(.loaded) .locator {
     left: 16px;
     right: 16px;
     justify-content: space-between;
+    gap: 12px;
+  }
+  .nav a,
+  .favs summary {
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+  }
+  .textsize button {
+    min-width: 20px;
+    padding: 0 2px;
   }
   .search {
     top: 52px;

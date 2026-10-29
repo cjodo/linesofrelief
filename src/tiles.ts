@@ -150,10 +150,15 @@ async function decodeElevation(blob: Blob): Promise<Float32Array> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
-  const px = ctx.getImageData(0, 0, TILE, TILE).data;
+  return terrariumToElevation(ctx.getImageData(0, 0, TILE, TILE).data, 4);
+}
+
+/** Terrarium-encoded pixels (RGB or RGBA, `channels` per pixel) → metres. */
+export function terrariumToElevation(px: ArrayLike<number>, channels: number): Float32Array {
   const out = new Float32Array(TILE * TILE);
   for (let i = 0; i < out.length; i++) {
-    const h = px[i * 4] * 256 + px[i * 4 + 1] + px[i * 4 + 2] / 256 - 32768;
+    const p = i * channels;
+    const h = px[p] * 256 + px[p + 1] + px[p + 2] / 256 - 32768;
     // Sea level is the floor: oceans stay quiet, coastlines come from vectors.
     out[i] = h > 0 ? h : 0;
   }
@@ -233,7 +238,7 @@ const emptyVector: VectorData = {
 const LAKE_CLASSES = new Set(['lake', 'pond', 'river']);
 const PLACE_KINDS: Record<string, LabelKind> = { city: 'city', town: 'town', village: 'village' };
 
-function decodeVector(buf: ArrayBuffer): VectorData {
+export function decodeVector(buf: ArrayBuffer): VectorData {
   const layers = decodeTile(buf);
   const ocean = new GeometryBuilder();
   const lake = new GeometryBuilder();

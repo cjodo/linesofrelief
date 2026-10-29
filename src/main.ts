@@ -14,6 +14,8 @@ import { createLegend } from './legend';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
 import { greet } from './banner';
+import { bundleUrl, decodeScene, favoriteFor, favoriteRequest } from './bundle';
+import type { Favorite } from '../site/favorites';
 import { createExport } from './export';
 import { createShare } from './share';
 import { settable } from './text';
@@ -372,13 +374,47 @@ function arrive(
       }
     : null;
 
-  // The page's own pre-rendered map stands in for the coarse preview.
+  // A favourite arrives pre-built: one file, no tiles, no tracing. Otherwise
+  // the page's own pre-rendered map, or the coarse preview, covers the wait.
+  const favorite = zoom === DEFAULT_ZOOM ? favoriteFor(place.lat, place.lon, w, h, TRIGGER) : null;
   if (home && prerenderLive) previewCanvas.hidden = true;
-  else {
+  else if (favorite) {
+    retirePrerender();
+    previewCanvas.hidden = true;
+  } else {
     retirePrerender();
     requestPreview();
   }
+  if (favorite) loadFavorite(favorite);
   ensure();
+}
+
+/** Fetch a favourite's pre-built scene in place of a worker request for it. */
+async function loadFavorite(f: Favorite) {
+  const r = favoriteRequest(f);
+  const id = ++nextId;
+  detailId = id;
+  pending = {
+    zoom: DEFAULT_ZOOM,
+    originX: r.tx0 * TILE,
+    originY: r.ty0 * TILE,
+    width: (r.tx1 - r.tx0 + 1) * TILE,
+    height: (r.ty1 - r.ty0 + 1) * TILE,
+  };
+  document.body.classList.add('busy');
+  try {
+    const res = await fetch(bundleUrl(f));
+    if (!res.ok) throw new Error(`${res.status}`);
+    const result = decodeScene(await res.arrayBuffer(), id);
+    if (detailId === id) await acceptScene(result);
+  } catch {
+    // Not built yet, or unreachable: build it live like anywhere else.
+    if (detailId !== id) return;
+    detailId = -1;
+    pending = null;
+    if (!scene) requestPreview();
+    ensure();
+  }
 }
 
 /** Queue the coarse preview ahead of the detailed request so it paints first. */
@@ -544,6 +580,11 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
     if (!scene) showProgress(msg);
     return;
   }
+  await acceptScene(msg);
+};
+
+/** A detailed scene is ready (from the worker, or a pre-built favourite). */
+async function acceptScene(msg: SceneResult) {
   await fontsReady;
   if (msg.id !== detailId) return;
   detailId = -1;
@@ -563,7 +604,7 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   reveal();
   requestDraw();
   ensure();
-};
+}
 
 // --- Panning ----------------------------------------------------------------
 
@@ -848,6 +889,21 @@ createExport(exportButton, () => {
   const { lat, lon } = worldToLonLat(cx, cy, zoom);
   const near = Math.hypot(cx - arrival.x, cy - arrival.y) < Math.max(w, h) / 2;
   return { scene, x: cx - w / 2, y: cy - h / 2, w, h, zoom, name: near ? arrival.name : undefined, lat, lon };
+});
+
+// The nav's favourites arrive in place on the map (they're plain links elsewhere).
+const favs = document.querySelector<HTMLDetailsElement>('.favs');
+favs?.addEventListener('click', (e) => {
+  const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-favorite]');
+  if (!a) return;
+  const spot = readSpot(new URL(a.href).search);
+  if (!spot) return;
+  e.preventDefault();
+  favs.open = false;
+  arrive(spot, { push: true, announce: true });
+});
+document.addEventListener('pointerdown', (e) => {
+  if (favs?.open && !favs.contains(e.target as Node)) favs.open = false;
 });
 
 const landing = () => readSpot() ?? pageSpot ?? START;

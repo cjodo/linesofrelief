@@ -271,6 +271,7 @@ async fn browser_cache(req: Request, next: Next) -> Response {
         "no-cache"
     } else if path.starts_with("/og/")
         || path.starts_with("/prerender/")
+        || path.starts_with("/favorites/")
         || path.ends_with(".png")
         || path.ends_with(".jpg")
     {

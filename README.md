@@ -47,6 +47,16 @@ search ──────────┘                       └─ labels, di
   - Each of the 56 summits gets two pages: a summary at `/mountains/<slug>/` and its live map at `/mountains/<slug>/map/`.
   - There's also an index at `/mountains/`, plus a sitemap, share images and pre-rendered first frames.
 
+## Favourites
+
+`site/favorites.ts` is the creator's list of favourite places: typed, one line
+each. They appear under **Favourites** in the nav, and each is pre-built by
+`make favorites` into a single file holding the finished scene: contours,
+water, borders and names, made by the same code the browser runs. Arriving at
+a favourite fetches that one file (about 0.5 MB compressed) instead of about 85 tiles,
+and skips decoding and contour tracing entirely. Pan off its edge, or change
+the zoom, and the map carries on live.
+
 ## Run it
 
 You need Node 22+, and Rust if you change the kernel or the server.
@@ -79,6 +89,7 @@ docker run -p 8080:8080 -e PORT=8080 -e REDIS_URL=redis://host:6379 topography
 | `make verify` | Check every summit in `site/peaks.ts` against the elevation tiles. |
 | `make og` | Render share images (`public/og*.jpg`). |
 | `make prerender` | Render the pre-rendered first frames (`public/prerender/*.webp`). |
+| `make favorites` | Pre-build every place in `site/favorites.ts` into `public/favorites/*.bin`. |
 
 `og` and `prerender` drive a headless Chromium. Set `CHROMIUM=/path/to/chrome`
 if Playwright can't find one, and `SLUGS="everest k2"` to render just those.
