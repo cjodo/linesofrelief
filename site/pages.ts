@@ -77,7 +77,7 @@ export function rootPage(
     description,
     image: '/og.jpg',
     imageAlt:
-      'Contour lines of the Three Sisters volcanoes in Oregon, drawn in teal, iris, rose and gold on a dark background',
+      'Contour lines of the Three Sisters above Canmore, Alberta, drawn in teal, iris, rose and gold on a dark background',
     spot: start,
     prerender: hasPrerender ? 'home' : undefined,
     jsonLd: [

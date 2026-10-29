@@ -1,7 +1,7 @@
 // Opinionated parameters: a handful of scales and one look.
 
-/** Where every visit begins: the Three Sisters, Oregon Cascades. */
-export const START = { name: 'Three Sisters', lat: 44.135, lon: -121.772 };
+/** Where every visit begins: the Three Sisters above Canmore, Alberta (centred on the group). */
+export const START = { name: 'Three Sisters', lat: 51.0208, lon: -115.3409 };
 
 /**
  * The web-mercator zooms the view steps through (one tile pixel is one CSS

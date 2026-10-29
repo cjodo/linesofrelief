@@ -2,7 +2,7 @@
  * Renders the first frame for / and each summit page: the fully loaded map
  * canvas (no interface) at each PRERENDER size, as WebP, into
  * public/prerender/<key>-<size>.webp. The pages ship these as their first
- * paint. Use `make prerender` (optionally SLUGS="everest k2").
+ * paint. Use `make prerender` (optionally SLUGS="home everest k2").
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -24,7 +24,7 @@ const context = await browser.newContext({ deviceScaleFactor: 1 });
 const page = await context.newPage();
 
 const pages = [
-  ...(ONLY.length ? [] : [{ key: 'home', path: '/' }]),
+  ...(!ONLY.length || ONLY.includes('home') ? [{ key: 'home', path: '/' }] : []),
   ...PEAKS.filter((p) => !ONLY.length || ONLY.includes(p.slug)).map((p) => ({
     key: p.slug,
     path: `/mountains/${p.slug}/map/`,

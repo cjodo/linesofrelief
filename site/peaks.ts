@@ -57,9 +57,10 @@ export const PEAKS: Peak[] = [
   { slug: 'mount-joffre', name: 'Mount Joffre', ele: 3450, range: 'Canadian Rockies', country: 'Canada', lat: 50.5284, lon: -115.2069 },
   { slug: 'mount-edith-cavell', name: 'Mount Edith Cavell', ele: 3363, range: 'Canadian Rockies', country: 'Canada', lat: 52.6673, lon: -118.0572 },
   { slug: 'cascade-mountain', name: 'Cascade Mountain', ele: 2998, range: 'Canadian Rockies', country: 'Canada', lat: 51.229, lon: -115.5629 },
+  // The group above Canmore: centred on Middle Sister; elevation is Big Sister's.
+  { slug: 'three-sisters', name: 'Three Sisters', ele: 2936, range: 'Canadian Rockies', country: 'Canada', lat: 51.0208, lon: -115.3409 },
   { slug: 'mount-rundle', name: 'Mount Rundle', ele: 2949, range: 'Canadian Rockies', country: 'Canada', lat: 51.1246, lon: -115.4692 },
   { slug: 'mount-hood', name: 'Mount Hood', ele: 3429, range: 'Cascade Range', country: 'United States', lat: 45.3736, lon: -121.696 },
-  { slug: 'three-sisters', name: 'Three Sisters', ele: 3157, range: 'Cascade Range', country: 'United States', lat: 44.135, lon: -121.772 },
   { slug: 'mount-st-helens', name: 'Mount St. Helens', ele: 2549, range: 'Cascade Range', country: 'United States', lat: 46.1914, lon: -122.1956 },
   { slug: 'half-dome', name: 'Half Dome', ele: 2694, range: 'Sierra Nevada', country: 'United States', lat: 37.7459, lon: -119.5332 },
   { slug: 'elbrus', name: 'Mount Elbrus', ele: 5642, range: 'Caucasus', country: 'Russia', lat: 43.3499, lon: 42.4453 },
