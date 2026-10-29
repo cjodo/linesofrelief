@@ -22,6 +22,8 @@ export interface Landmark {
 
 export const landmarkPath = (l: Landmark) => `/landmarks/${l.slug}/`;
 export const landmarkRender = (l: Landmark) => `/landmarks/${l.slug}.webp`;
+/** It on its site model (its neighbourhood's buildings, water and ground), when rendered. */
+export const landmarkSiteRender = (l: Landmark) => `/landmarks/${l.slug}-site.webp`;
 export const landmarkImage = (l: Landmark) => `/og/landmarks/${l.slug}.jpg`;
 
 export const LANDMARKS: Landmark[] = [

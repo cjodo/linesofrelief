@@ -4,7 +4,7 @@
  * /mountains/ index and /why/. Imported by vite.config.ts only.
  */
 import { FAVORITES } from './favorites.ts';
-import { LANDMARKS, landmarkImage, landmarkPath, landmarkRender, type Landmark } from './landmarks.ts';
+import { LANDMARKS, landmarkImage, landmarkPath, landmarkRender, landmarkSiteRender, type Landmark } from './landmarks.ts';
 import { detailOf, PEAKS, type Peak } from './peaks.ts';
 import { WHY } from './why.ts';
 
@@ -511,6 +511,9 @@ const PAGE_CSS = `
       }
       .render img { position: relative; display: block; width: auto; max-width: 100%; max-height: min(78vh, 760px); height: auto; }
       .landmark-text { margin-top: 8px; }
+      .site-render { margin: 0; }
+      .site-render img { display: block; width: 100%; height: auto; }
+      .site-render figcaption { max-width: 60ch; margin-top: 12px; font: 400 0.62rem/1.6 var(--mono); letter-spacing: 0.08em; color: var(--muted); }
       .landmark-text h1 { color: var(--love); }
       .landmark-text .cta { border-color: color-mix(in srgb, var(--love) 45%, var(--overlay)); }
       .landmark-text .cta:hover, .landmark-text .cta:focus-visible { color: var(--love); border-color: var(--love); }
@@ -905,6 +908,8 @@ export function landmarkHtml(
   const page = landmarkPage(l, site);
   const others = LANDMARKS.filter((o) => o !== l);
   const v = version?.(landmarkRender(l));
+  // The site model shows on its page only (not the index, not the share image), once rendered.
+  const siteV = version?.(landmarkSiteRender(l));
   const body = `      <header>
         <figure class="render">
           <img src="${landmarkRender(l)}${v ? `?v=${v}` : ''}" alt="${esc(page.imageAlt)}" fetchpriority="high" />
@@ -930,6 +935,19 @@ export function landmarkHtml(
         the rest the one way it draws everything: <a href="${esc(landmarkMap(l))}">the ground under
         ${esc(l.city)}</a>, as contour lines coloured by height, with its water and its names.</p>
       </section>
+
+${
+  siteV
+    ? `
+      <h2>Its ground</h2>
+      <figure class="site-render">
+        <img src="${landmarkSiteRender(l)}?v=${siteV}" loading="lazy"
+          alt="A site model of the ${esc(l.name)} in its neighbourhood: the landmark in Rosé Pine red among grey buildings, with its water in blue" />
+        <figcaption>Its neighbourhood as a site model: buildings and water from OpenStreetMap, the ground from the
+        terrain tiles the map draws its contours from.</figcaption>
+      </figure>`
+    : ''
+}
 
       <h2>Other landmarks</h2>
       <ul class="near landmarks">${others
