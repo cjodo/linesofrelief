@@ -518,7 +518,7 @@ const PAGE_CSS = `
         margin: 10px var(--bleed) 0; text-align: right;
         font: 400 0.6rem/1.6 var(--mono); letter-spacing: 0.08em; color: var(--muted);
       }
-      @media (max-width: 700px) {
+      @media (max-width: 1200px) {
         .renders { flex-direction: column; align-items: stretch; }
         .renders-caption { text-align: left; }
       }
