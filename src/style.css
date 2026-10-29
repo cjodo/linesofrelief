@@ -1285,10 +1285,28 @@ body:not(.loaded) .locator {
   }
 }
 
+/* Phones: the top bar's labels keep a fixed size (in px, not rem), so the
+   larger text sizes can't push the row off screen; map labels and the
+   rest of the text still scale. */
+@media (max-width: 520px) {
+  .nav a,
+  .favs summary {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+  }
+  .nav {
+    gap: 10px;
+  }
+  .favs summary::after {
+    content: '';
+  }
+}
+
 @media (max-width: 380px) {
   .nav a,
   .favs summary {
-    font-size: 0.56rem;
+    font-size: 9px;
     letter-spacing: 0.08em;
   }
   .textsize {
@@ -1382,8 +1400,19 @@ body:not(.loaded) .locator {
   .locator {
     right: 16px;
     bottom: 16px;
-    width: 9.5rem;
+    /* Capped in px: rem alone grows past half a phone at large text. */
+    width: min(9.5rem, 150px, 44vw);
     gap: 6px;
+  }
+  /* Keep the column to the locator's width: long lines wrap, not overflow. */
+  .locator {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .coords {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    white-space: normal;
+    text-align: right;
   }
   .region {
     font-size: 0.95rem;
