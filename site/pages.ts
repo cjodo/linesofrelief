@@ -485,13 +485,7 @@ const PAGE_CSS = `
       /* /why/: the words on the left, the globe turning beside them (above, on phones). */
       .why { display: grid; gap: 8px; }
       .why-globe { margin: 24px 0 0; }
-      .why-globe canvas {
-        display: block; width: min(72vw, 320px); aspect-ratio: 1; margin: 0 auto;
-        /* A faint atmosphere: foam at the rim, fading out. */
-        border-radius: 50%;
-        box-shadow: 0 0 0 1px color-mix(in srgb, #9ccfd8 14%, transparent),
-          0 0 60px -6px color-mix(in srgb, var(--iris) 28%, transparent);
-      }
+      .why-globe canvas { display: block; width: min(72vw, 320px); aspect-ratio: 1; margin: 0 auto; }
       @media (min-width: 1000px) {
         .why { grid-template-columns: minmax(0, 60ch) 1fr; column-gap: 64px; align-items: start; }
         .why-globe { grid-column: 2; grid-row: 1; position: sticky; top: 96px; margin-top: 72px; }

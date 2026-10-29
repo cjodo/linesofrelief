@@ -20,8 +20,8 @@ export interface GlobeOptions {
 /** The light comes from the upper left, in front: near lines catch it. */
 const LIGHT = normalise([-0.45, 0.5, 0.75]);
 /** Near-side lines run from this brightness (at the limb) to LIT (facing the light). */
-const DIM = 0.75;
-const LIT = 1.15;
+const DIM = 0.95;
+const LIT = 1.35;
 /** Far-side lines show through at this strength. */
 const THROUGH = 0.3;
 

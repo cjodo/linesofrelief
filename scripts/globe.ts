@@ -142,13 +142,13 @@ function colour(rgb: RGB, alpha: number) {
   }
   return first;
 }
-const GRID = colour(css(ramp(0.5)), 0.3);
-const COAST = colour(hex(INK.shore), 0.92);
+const GRID = colour(css(ramp(0.5)), 0.4);
+const COAST = colour(hex(INK.shore), 1);
 const RAMP0 = palette.length;
 for (let s = 0; s < STEPS; s++) {
   const t = s / (STEPS - 1);
   // Lowlands recede, high ground glows: the map's wide-view relief emphasis.
-  colour(css(ramp(t)), 0.35 + 0.65 * t);
+  colour(css(ramp(t)), 0.65 + 0.35 * t);
 }
 
 // --- Lines -------------------------------------------------------------------------
