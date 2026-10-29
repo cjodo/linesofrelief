@@ -78,12 +78,16 @@ landmark-sites: node_modules $(SERVER)
 	  --outfile=$(SITES_SCRIPT) --log-level=warning
 	$(call with-server,$(SITES_SCRIPT))
 
-## landmarks: clay renders of site/landmarks.ts in Blender (public/landmarks/, public/og/landmarks/)
+## landmarks: clay renders of site/landmarks.ts in Blender (public/landmarks/, public/og/landmarks/),
+##            and each one on its site model when make landmark-sites has fetched it
 ##            (optionally SLUGS="colosseum"); one Blender each keeps memory low
 LANDMARK_SLUGS := $(shell sed -n "s/^    slug: '\(.*\)',$$/\1/p" site/landmarks.ts)
 landmarks:
 	@for slug in $(or $(SLUGS),$(LANDMARK_SLUGS)); do \
 	  blender -b --factory-startup -P scripts/landmarks.py -- "$(CURDIR)" $$slug 2>&1 | grep -E '^rendered|Error' || exit 1; \
+	  if [ -f .cache/landmarks/$$slug.json ]; then \
+	    LANDMARKS_SITE=1 blender -b --factory-startup -P scripts/landmarks.py -- "$(CURDIR)" $$slug 2>&1 | grep -E '^rendered|Error' || exit 1; \
+	  fi; \
 	done
 
 ## verify: check summit coordinates in site/peaks.ts against the elevation tiles
