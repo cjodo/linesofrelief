@@ -210,31 +210,60 @@ async function nearest({ id, kind, z, x, y, min, skip }: NearestRequest): Promis
   return { type: 'nearest', id, kind, found: best.found };
 }
 
+// Track the last AbortController to cancel previous requests
+let lastAbortController = new AbortController();
+
 self.onmessage = async (e: MessageEvent<SceneRequest | NameRequest | NearestRequest>) => {
+  // Cancel the previous request
+  lastAbortController.abort();
+  lastAbortController = new AbortController();
+  const signal = lastAbortController.signal;
+  
   const msg = e.data;
   if ('type' in msg) {
-    self.postMessage(msg.type === 'nearest' ? await nearest(msg) : await nameAt(msg));
+    try {
+      const result = msg.type === 'nearest' ? await nearest(msg) : await nameAt(msg);
+      if (!signal.aborted) {
+        self.postMessage(result);
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        throw e;
+      }
+    }
     return;
   }
   // This request replaces the last of its kind: tiles queued only for that one
   // are skipped (the view has moved on), tiles both want are kept.
   const group = msg.features ? 'detail' : 'preview';
   startGroup(group);
-  const result = await buildRegion(
-    msg,
-    kernel,
-    {
-      elevation: (z, x, y) => loadElevation(z, x, y, group),
-      vector: (z, x, y) =>
-        Promise.all([loadVector(z, x, y, group), loadMuseums(z, x, y, group)]).then(([v, m]) =>
-          withMuseums(v, m),
-        ),
-    },
-    (done, total) =>
-      self.postMessage({ type: 'progress', id: msg.id, done, total } satisfies SceneProgress),
-  );
-  // Contour buffers are fresh copies; vector buffers stay cached, so they're cloned.
-  self.postMessage(result, {
-    transfer: result.levels.flatMap((l) => [l.coords.buffer, l.parts.buffer]),
-  });
+  try {
+    const result = await buildRegion(
+      msg,
+      kernel,
+      {
+        elevation: (z, x, y) => loadElevation(z, x, y, group, signal),
+        vector: (z, x, y) =>
+          Promise.all([
+            loadVector(z, x, y, group, signal),
+            loadMuseums(z, x, y, group, signal),
+          ]).then(([v, m]) => withMuseums(v, m)),
+      },
+      (done, total) => {
+        if (!signal.aborted) {
+          self.postMessage({ type: 'progress', id: msg.id, done, total } satisfies SceneProgress);
+        }
+      },
+    );
+    if (!signal.aborted) {
+      // Contour buffers are fresh copies; vector buffers stay cached, so they're cloned.
+      self.postMessage(result, {
+        transfer: result.levels.flatMap((l) => [l.coords.buffer, l.parts.buffer]),
+      });
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      throw e;
+    }
+  }
 };

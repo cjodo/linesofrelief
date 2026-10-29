@@ -96,13 +96,13 @@ async function pruneDisk(cache: Cache) {
  * cached or returned: anything else (say, an HTML page a CDN served at a tile
  * URL) counts as a failure, so it's retried later instead of kept forever.
  */
-async function fetchCached(url: string, type: string, group?: Group): Promise<Response | null> {
+async function fetchCached(url: string, type: string, group?: Group, signal?: AbortSignal): Promise<Response | null> {
   const isTile = (r: Response) => r.ok && (r.headers.get('content-type') ?? '').startsWith(type);
   const cache = await openDisk();
   const hit = await cache?.match(url);
   if (hit && isTile(hit)) return hit;
 
-  const res = await throttled(() => fetch(url), url, group);
+  const res = await throttled(() => fetch(url, { signal }), url, group);
   if (!isTile(res)) throw new Error(`unexpected response for ${url}`);
   if (cache) {
     await cache.put(url, res.clone()).catch(() => {});
@@ -168,7 +168,7 @@ export function terrariumToElevation(px: ArrayLike<number>, channels: number): F
 }
 
 /** Elevation in metres for a tile, row-major TILE×TILE. Never rejects. */
-export function loadElevation(z: number, x: number, y: number, group?: Group): Promise<Float32Array> {
+export function loadElevation(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<Float32Array> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(flat);
   const url = terrainUrl(z, t.x, t.y);
@@ -177,7 +177,7 @@ export function loadElevation(z: number, x: number, y: number, group?: Group): P
     elevations,
     url,
     async () => {
-      const res = await fetchCached(url, 'image/png', group);
+      const res = await fetchCached(url, 'image/png', group, signal);
       return res ? decodeElevation(await res.blob()) : flat;
     },
     flat,
@@ -324,7 +324,7 @@ const MUSEUM_BACKOFF_MS = 60_000;
 let museumsDownUntil = 0;
 
 /** Museums in a map tile, in tile pixels; none at wide zooms. Never rejects. */
-export function loadMuseums(z: number, x: number, y: number, group?: Group): Promise<Label[]> {
+export function loadMuseums(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<Label[]> {
   const t = z >= MUSEUM_MIN_ZOOM ? normalize(z, x, y) : null;
   if (!t || Date.now() < museumsDownUntil) return Promise.resolve([]);
   const url = museumUrl(z, t.x, t.y);
@@ -334,7 +334,7 @@ export function loadMuseums(z: number, x: number, y: number, group?: Group): Pro
     url,
     async () => {
       try {
-        const res = await fetchCached(url, 'application/json', group);
+        const res = await fetchCached(url, 'application/json', group, signal);
         return res ? decodeMuseums(await res.json(), z, t.x, t.y) : [];
       } catch (e) {
         // A superseded fetch isn't a failure; anything else rests the route.
@@ -349,7 +349,7 @@ export function loadMuseums(z: number, x: number, y: number, group?: Group): Pro
 const vectors = new Map<string, Promise<VectorData>>();
 
 /** Water, borders and names for a tile, in tile pixels. Never rejects. */
-export function loadVector(z: number, x: number, y: number, group?: Group): Promise<VectorData> {
+export function loadVector(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<VectorData> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(emptyVector);
   const url = vectorUrl(z, t.x, t.y);
@@ -358,7 +358,7 @@ export function loadVector(z: number, x: number, y: number, group?: Group): Prom
     vectors,
     url,
     async () => {
-      const res = await fetchCached(url, 'application/x-protobuf', group);
+      const res = await fetchCached(url, 'application/x-protobuf', group, signal);
       return res ? decodeVector(await res.arrayBuffer()) : emptyVector;
     },
     emptyVector,
