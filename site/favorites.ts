@@ -28,6 +28,7 @@ export const FAVORITES: Favorite[] = [
     note: 'Where every visit begins: above Canmore.',
   },
   { slug: 'lake-louise', name: 'Lake Louise', lat: 51.4115, lon: -116.229 },
+  { slug: 'sunshine-village', name: 'Sunshine Village', lat: 51.0895, lon: -115.7622 },
   { slug: 'mount-bachelor', name: 'Mount Bachelor', lat: 43.9794, lon: -121.6885 },
   { slug: 'black-tusk', name: 'The Black Tusk', lat: 49.9754, lon: -123.0427 },
   { slug: 'mount-st-helens', name: 'Mount St. Helens', lat: 46.1914, lon: -122.1955 },
