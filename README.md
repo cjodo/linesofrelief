@@ -129,5 +129,6 @@ scripts/        verify peaks, render share images and first frames, subset fonts
 
 ## License
 
-The code's license hasn't been chosen yet. The map data and fonts keep their
-own licenses and attribution requirements, listed above.
+The code is licensed under the [Apache License 2.0](LICENSE). The map data,
+elevation data and fonts keep their own licenses and attribution
+requirements, listed above.
