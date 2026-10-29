@@ -89,6 +89,34 @@ const BADGE_HALF = (dot: number) => dot + 3.5;
 const BADGE_TILT = -0.17;
 /** Where a settlement's badge sits, from its anchor (screen px at text size 1). */
 export const badgeOffset = (dot: number) => ({ x: dot + 2, y: -dot * 0.5 - 1.5 });
+/** Lifted (hovered, or its list open), a badge straightens and grows a little. */
+const LIFT = 1.25;
+
+/** The town badge or museum icon under the pointer or open, by labelKey: drawn lifted. */
+let active: string | null = null;
+export function setActive(key: string | null) {
+  const changed = key !== active;
+  active = key;
+  return changed;
+}
+
+/**
+ * What a pointer must touch to reach a settlement's museums: its dot and the
+ * badge behind it (not its name), in scene px, with a little slop.
+ */
+export function badgeBox({ label }: PlacedLabel): [number, number, number, number] {
+  const dot = DOT[label.kind] ?? 0;
+  const at = badgeOffset(dot);
+  const half = BADGE_HALF(dot) * LIFT;
+  const k = labelScale;
+  const slop = 4;
+  return [
+    label.x + (-dot - slop) * k,
+    label.y + (at.y - half - slop) * k,
+    label.x + (at.x + half + slop) * k,
+    label.y + (Math.max(dot, at.y + half) + slop) * k,
+  ];
+}
 
 /** Settlement dot radius; names sit just above the dot. */
 export const DOT: Partial<Record<LabelKind, number>> = { city: 3, town: 2.2, village: 1.6 };
@@ -326,14 +354,14 @@ export function drawLines(ctx: CanvasRenderingContext2D, f: Features, v: View) {
  * A settlement with museums keeps one tucked behind its dot, up and to the
  * right and a little askew: a sticky note behind a token.
  */
-function tuckMuseum(ctx: CanvasRenderingContext2D, dot: number) {
+function tuckMuseum(ctx: CanvasRenderingContext2D, dot: number, lifted: boolean) {
   museumPath ??= new Path2D(MUSEUM_ICON);
-  const k = (BADGE_HALF(dot) * 2) / 16;
+  const k = ((BADGE_HALF(dot) * 2) / 16) * (lifted ? LIFT : 1);
   ctx.save();
   ctx.globalAlpha = 1;
   const at = badgeOffset(dot);
-  ctx.translate(at.x, at.y);
-  ctx.rotate(BADGE_TILT);
+  ctx.translate(at.x, at.y - (lifted ? 1 : 0));
+  if (!lifted) ctx.rotate(BADGE_TILT);
   ctx.scale(k, k);
   ctx.translate(-8, -8);
   ctx.fillStyle = INK.border;
@@ -369,12 +397,13 @@ export function drawLabels(ctx: CanvasRenderingContext2D, f: Features, v: View) 
     if (label.kind === 'museum') {
       museumPath ??= new Path2D(MUSEUM_ICON);
       ctx.globalAlpha = 1;
+      if (labelKey(label) === active) ctx.scale(LIFT, LIFT);
       ctx.translate(-8, -8);
       ctx.lineWidth = 2.5;
       ctx.stroke(museumPath);
       ctx.fill(museumPath, 'evenodd');
     } else if (dot) {
-      if (museums?.length) tuckMuseum(ctx, dot);
+      if (museums?.length) tuckMuseum(ctx, dot, labelKey(label) === active);
       ctx.beginPath();
       ctx.arc(0, 0, dot, 0, Math.PI * 2);
       ctx.lineWidth = 2.5;

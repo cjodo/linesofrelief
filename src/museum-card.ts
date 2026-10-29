@@ -37,7 +37,8 @@ const EDGE = 16;
 
 const cache = new Map<string, Promise<MuseumInfo | null>>();
 
-function fetchInfo({ name, town, lat, lon }: MuseumSpot): Promise<MuseumInfo | null> {
+/** A museum's write-up, fetched once and shared: hovering fetches ahead of the card. */
+export function museumInfo({ name, town, lat, lon }: MuseumSpot): Promise<MuseumInfo | null> {
   const key = `${name}|${town ?? ''}@${lat.toFixed(4)},${lon.toFixed(4)}`;
   let hit = cache.get(key);
   if (!hit) {
@@ -138,7 +139,7 @@ export function createMuseumCard(root: HTMLElement) {
       place();
       void root.offsetWidth; // start the entrance from closed
       root.classList.add('open');
-      fetchInfo(spot).then((info) => {
+      museumInfo(spot).then((info) => {
         if (openFor !== spot) return; // closed, or another museum since
         render(spot, info);
         place();
