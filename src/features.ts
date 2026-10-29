@@ -21,10 +21,12 @@ interface TilePaths {
   border: Path2D | null;
 }
 
-interface PlacedLabel {
+export interface PlacedLabel {
   label: Label;
   text: string;
   box: [number, number, number, number];
+  /** A settlement's museums, most important first (drawn or not). */
+  museums?: Label[];
 }
 
 export interface Features {
@@ -162,14 +164,40 @@ function placeLabels(
   return placed;
 }
 
+/** How far (metres) a settlement's museums may lie from its dot. */
+const MUSEUM_REACH: Partial<Record<LabelKind, number>> = { city: 10_000, town: 4_000, village: 2_000 };
+
+/**
+ * Give each museum to the settlement on the map it most belongs to: the
+ * nearest relative to the settlement's reach, so a city outreaches a village.
+ */
+function gatherMuseums(placed: PlacedLabel[], labels: Label[], mpp: number) {
+  const towns = placed.filter((p) => MUSEUM_REACH[p.label.kind]);
+  for (const m of labels) {
+    if (m.kind !== 'museum') continue;
+    let home: PlacedLabel | null = null;
+    let best = 1;
+    for (const t of towns) {
+      const r = (Math.hypot(t.label.x - m.x, t.label.y - m.y) * mpp) / MUSEUM_REACH[t.label.kind]!;
+      if (r < best) [home, best] = [t, r];
+    }
+    if (home) (home.museums ??= []).push(m);
+  }
+  for (const t of towns) t.museums?.sort((a, b) => a.rank - b.rank);
+}
+
+/** `mpp`: ground metres per scene pixel, for gathering museums into towns. */
 export function buildFeatures(
   ctx: CanvasRenderingContext2D,
   tiles: TileFeatures[],
   labels: Label[],
   width: number,
   height: number,
+  mpp: number,
   keep: Set<string> = new Set(),
 ): Features {
+  const placed = placeLabels(ctx, labels, width, height, keep);
+  gatherMuseums(placed, labels, mpp);
   return {
     tiles: tiles.map((t) => ({
       ox: t.ox,
@@ -180,7 +208,7 @@ export function buildFeatures(
       river: pathOf(t.river),
       border: pathOf(t.border),
     })),
-    labels: placeLabels(ctx, labels, width, height, keep),
+    labels: placed,
   };
 }
 
@@ -273,6 +301,25 @@ export function drawLines(ctx: CanvasRenderingContext2D, f: Features, v: View) {
   });
 }
 
+/**
+ * A settlement with museums keeps one tucked behind its dot: the icon at
+ * about the dot's size, peeking out to the right like a card behind a token.
+ */
+function tuckMuseum(ctx: CanvasRenderingContext2D, dot: number) {
+  museumPath ??= new Path2D(MUSEUM_ICON);
+  const k = (dot * 2 + 4) / 16;
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.translate(dot + 1.5, 0.5);
+  ctx.scale(k, k);
+  ctx.translate(-8, -8);
+  ctx.fillStyle = INK.border;
+  ctx.lineWidth = 2.5 / k;
+  ctx.stroke(museumPath);
+  ctx.fill(museumPath, 'evenodd');
+  ctx.restore();
+}
+
 function haloText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number) {
   ctx.strokeText(text, x, y);
   ctx.fillText(text, x, y);
@@ -285,7 +332,7 @@ export function drawLabels(ctx: CanvasRenderingContext2D, f: Features, v: View) 
   ctx.lineJoin = 'round';
   ctx.strokeStyle = INK.base;
   ctx.lineWidth = 3.5;
-  for (const { label, text, box } of f.labels) {
+  for (const { label, text, box, museums } of f.labels) {
     if (box[2] < v.x || box[0] > v.x + v.w || box[3] < v.y || box[1] > v.y + v.h) continue;
     const s = STYLE[label.kind];
     // Each label is drawn around its anchor at text size 1, then scaled.
@@ -304,6 +351,7 @@ export function drawLabels(ctx: CanvasRenderingContext2D, f: Features, v: View) 
       ctx.stroke(museumPath);
       ctx.fill(museumPath, 'evenodd');
     } else if (dot) {
+      if (museums?.length) tuckMuseum(ctx, dot);
       ctx.beginPath();
       ctx.arc(0, 0, dot, 0, Math.PI * 2);
       ctx.lineWidth = 2.5;

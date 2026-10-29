@@ -44,6 +44,7 @@
   --text: #e0def4;
   --rose: #ebbcba;
   --iris: #c4a7e7;
+  --love: #eb6f92;
 
   --serif: 'Instrument Serif', Georgia, serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -979,6 +980,134 @@ body:has(.search.searching) .loading-bar {
   outline-offset: 3px;
 }
 
+/* --- A town's museums: an inventory unfolding from its dot ------------------ */
+
+.collection {
+  position: fixed;
+  z-index: 4;
+  min-width: 11rem;
+  max-width: 17rem;
+  padding: 12px 12px 10px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--love) 30%, var(--overlay));
+  border-radius: 2px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.6);
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.15);
+  clip-path: inset(0 100% 100% 0);
+  transition:
+    opacity 0.18s ease,
+    transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
+    clip-path 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 0.32s;
+}
+.collection.flip {
+  clip-path: inset(0 0 100% 100%);
+}
+.collection.open {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  clip-path: inset(0);
+  transition-delay: 0s;
+}
+.collection header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 9px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--overlay);
+}
+.collection .mark {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.collection .town {
+  flex: 1;
+  font: 400 0.62rem/1.2 var(--mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.collection .count {
+  font: 400 0.56rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.collection ol {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  padding: 0;
+}
+/* Slots arrive one after another, like an inventory filling. */
+.collection li,
+.collection .more {
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.collection.open li,
+.collection.open .more {
+  opacity: 1;
+  transform: none;
+  transition-delay: calc(0.1s + var(--i) * 0.04s);
+}
+.collection button {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 6px 3px 3px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.collection .slot {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: 1px solid var(--overlay);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--base) 60%, transparent);
+  transition: border-color 0.2s ease;
+}
+.collection .slot svg {
+  width: 13px;
+  height: 13px;
+}
+.collection .name {
+  font: italic 400 0.95rem/1.15 var(--serif);
+  color: var(--subtle);
+  transition: color 0.2s ease;
+}
+.collection button:hover .slot,
+.collection button:focus-visible .slot {
+  border-color: color-mix(in srgb, var(--love) 60%, var(--overlay));
+}
+.collection button:hover .name,
+.collection button:focus-visible .name {
+  color: var(--text);
+}
+.collection .more {
+  margin: 6px 0 0 35px;
+  font: 400 0.56rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 /* --- Favourites: a disclosure in the nav ----------------------------------- */
 
 .favs {
@@ -1232,6 +1361,12 @@ body:not(.loaded) .locator {
   #preview.ready {
     animation: none;
   }
+  .collection,
+  .collection li,
+  .collection .more {
+    transform: none;
+    clip-path: none;
+  }
   .consent-card {
     transition: opacity 0.3s ease;
   }
@@ -1257,7 +1392,7 @@ body:not(.loaded) .locator {
 }
 
 /* --- Layering: one scale for everything over the map ------------------------
- * map < vignette < legend/locator (auto) < top bar (5) < discovery card (6)
+ * map < vignette < legend/locator (auto) < a town's museums (4) < top bar (5) < discovery card (6)
  * < an open menu (12) < loading bar (20) < consent (40)
  */
 .nav:has(.favs[open]),

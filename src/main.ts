@@ -20,10 +20,18 @@ import type {
   SceneResult,
 } from './contour.worker';
 import { ATLAS_ZOOM, Atlas, CENTRE_PX, createCard, discovered, markDiscovered } from './discovery';
-import { buildFeatures, labelKey, setLabelScale, type Features } from './features';
+import {
+  buildFeatures,
+  DOT,
+  labelKey,
+  setLabelScale,
+  type Features,
+  type PlacedLabel,
+} from './features';
 import { createMinimap } from './minimap';
 import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
+import { createCollection } from './collection';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch, type Place } from './search';
 import { track } from './analytics';
@@ -347,6 +355,7 @@ function arrive(
   { push = false, announce = false, keepZoom = false } = {},
 ) {
   stopGlide();
+  collection.hide();
   // A link's zoom wins; a search keeps the reader's; otherwise the default.
   zoom = place.zoom ?? (keepZoom ? zoom : DEFAULT_ZOOM);
   updateZoomControls();
@@ -717,6 +726,12 @@ function withSummits(r: SceneResult): Label[] {
   return extra.length ? [...r.labels, ...extra] : r.labels;
 }
 
+/** Ground metres per scene pixel, at the scene's middle. */
+function sceneMpp(r: SceneResult) {
+  const { lat } = worldToLonLat(r.originX + r.width / 2, r.originY + r.height / 2, r.z);
+  return (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** r.z);
+}
+
 /** A detailed scene is ready (from the worker, or a pre-built favourite). */
 async function acceptScene(msg: SceneResult) {
   await fontsReady;
@@ -725,7 +740,8 @@ async function acceptScene(msg: SceneResult) {
   pending = null;
   document.body.classList.remove('busy');
   const keep = new Set(scene?.features.labels.map((p) => labelKey(p.label)));
-  const features = buildFeatures(ctx, msg.tiles, withSummits(msg), msg.width, msg.height, keep);
+  const labels = withSummits(msg);
+  const features = buildFeatures(ctx, msg.tiles, labels, msg.width, msg.height, sceneMpp(msg), keep);
   lastScene = msg;
   // One colour scale per arrival; re-fit only on reaching wholly new terrain.
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
@@ -758,6 +774,7 @@ let lastMoveAt = 0;
 let settleTimer = 0;
 
 function move(dx: number, dy: number) {
+  collection.hide();
   cx += dx;
   cy += dy;
   const now = performance.now();
@@ -799,6 +816,7 @@ function updateZoomControls() {
 function zoomTo(next: number, ax = w / 2, ay = h / 2) {
   if (!ZOOMS.includes(next) || next === zoom) return;
   stopGlide();
+  collection.hide();
   const f = 2 ** (next - zoom);
   cx = (cx - w / 2 + ax) * f - ax + w / 2;
   cy = (cy - h / 2 + ay) * f - ay + h / 2;
@@ -866,6 +884,44 @@ function famousPeakAt(sx: number, sy: number) {
   return null;
 }
 
+// --- A town's museums: hover (or tap) its dot ---------------------------------
+
+/** How far (screen px) from a town's dot still reaches it. */
+const TOWN_REACH_PX = 12;
+/** Where the open collection's museums are, in world pixels: its scene's origin. */
+let collectionOrigin = { x: 0, y: 0 };
+const collection = createCollection(document.querySelector<HTMLElement>('#collection')!, (m) => {
+  const town = collectionTown;
+  glideTo(collectionOrigin.x + m.x, collectionOrigin.y + m.y, () =>
+    playCard({ eyebrow: 'Museum', name: m.name, detail: town }),
+  );
+  track('museum_pick', { name: m.name });
+});
+let collectionTown = '';
+
+/** The town with museums whose dot (or name) is under screen (sx, sy). */
+function townAt(sx: number, sy: number): PlacedLabel | null {
+  if (!scene || scene.zoom !== zoom) return null;
+  const x = cx - w / 2 + sx - scene.originX; // scene pixels
+  const y = cy - h / 2 + sy - scene.originY;
+  for (const p of scene.features.labels) {
+    if (!p.museums?.length) continue;
+    const { box, label } = p;
+    const onName = x > box[0] && x < box[2] && y > box[1] && y < box[3];
+    if (onName || Math.hypot(x - label.x, y - label.y) < TOWN_REACH_PX + (DOT[label.kind] ?? 0)) return p;
+  }
+  return null;
+}
+
+function openTown(p: PlacedLabel) {
+  collectionOrigin = { x: scene!.originX, y: scene!.originY };
+  collectionTown = p.label.name;
+  const sx = p.label.x + scene!.originX - (cx - w / 2);
+  const sy = p.label.y + scene!.originY - (cy - h / 2);
+  if (collection.openKey !== labelKey(p.label)) track('museums_open', { town: p.label.name });
+  collection.show(labelKey(p.label), p.label.name, p.museums!, sx, sy);
+}
+
 // --- Pointer input: drag pans, pinch steps zoom (once per gesture) -----------
 
 const pointers = new Map<number, { x: number; y: number }>();
@@ -902,7 +958,10 @@ canvas.addEventListener('pointermove', (e) => {
   if (!pointers.has(e.pointerId)) {
     // Hovering (no button down): famous peaks show as links.
     if (e.pointerType === 'mouse') {
-      canvas.classList.toggle('linkable', famousPeakAt(e.clientX, e.clientY) !== null);
+      const town = townAt(e.clientX, e.clientY);
+      if (town) openTown(town);
+      else collection.hideSoon();
+      canvas.classList.toggle('linkable', town !== null || famousPeakAt(e.clientX, e.clientY) !== null);
     }
     return;
   }
@@ -932,7 +991,11 @@ const endPointer = (e: PointerEvent) => {
     performance.now() - press.at < CLICK_MS;
   press = null;
   if (click) {
-    const peak = famousPeakAt(e.clientX, e.clientY);
+    // A tap on a town opens its museums (touch has no hover); elsewhere closes them.
+    const town = townAt(e.clientX, e.clientY);
+    const peak = town ? null : famousPeakAt(e.clientX, e.clientY);
+    if (town) openTown(town);
+    else collection.hide();
     if (peak) location.assign(`/mountains/${peak.key}/`);
   }
   if (pointers.size < 2) pinch = null;
@@ -1017,7 +1080,10 @@ createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
   if (!scene || !lastScene) return;
   const m = lastScene;
   const keep = new Set(scene.features.labels.map((p) => labelKey(p.label)));
-  scene = { ...scene, features: buildFeatures(ctx, m.tiles, m.labels, m.width, m.height, keep) };
+  scene = {
+    ...scene,
+    features: buildFeatures(ctx, m.tiles, m.labels, m.width, m.height, sceneMpp(m), keep),
+  };
   requestDraw();
 });
 
