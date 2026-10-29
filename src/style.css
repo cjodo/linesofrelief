@@ -45,6 +45,7 @@
   --rose: #ebbcba;
   --iris: #c4a7e7;
   --love: #eb6f92;
+  --gold: #f6c177;
 
   --serif: 'Instrument Serif', Georgia, serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -229,6 +230,12 @@ body {
 /* Rows that come and go (museums: only where the map has some). */
 .key div[hidden] {
   display: none;
+}
+/* "3 nearby": a quiet notice in gold, arriving with its row. */
+.legend dd .near {
+  color: var(--gold);
+  font-size: 0.54rem;
+  animation: fade-in 0.6s ease;
 }
 /* An icon drawn at map size: same column width, a taller row. */
 .key svg.tall {

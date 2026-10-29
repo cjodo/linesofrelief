@@ -63,7 +63,7 @@ export function createLegend(root: HTMLElement, onFind: (kind: FindKind) => void
         </svg></dt><dd>summit</dd></div>
       ${find('museum', 'museum')}<dt><svg class="tall" viewBox="0 0 28 16">
           <path transform="translate(6 0)" d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/>
-        </svg></dt><dd>museum</dd></div>
+        </svg></dt><dd>museum <span class="near"></span></dd></div>
     </dl>
     </div>`;
 
@@ -105,13 +105,15 @@ export function createLegend(root: HTMLElement, onFind: (kind: FindKind) => void
 
   const museumRow = root.querySelector<HTMLElement>('[data-find="museum"]')!;
   museumRow.hidden = true;
+  const nearEl = museumRow.querySelector<HTMLElement>('.near')!;
 
   /**
    * Colour range and the contour intervals of the zoom level on screen;
-   * `museums`: whether the map around the view has any (the row shows only then).
+   * `museums`: how many the map around the view has (the row shows only then).
    */
-  return function update(lo: number, hi: number, minor: number, major: number, museums: boolean) {
-    museumRow.hidden = !museums;
+  return function update(lo: number, hi: number, minor: number, major: number, museums: number) {
+    museumRow.hidden = museums === 0;
+    nearEl.textContent = `${fmt.format(museums)} nearby`;
     majorEl.textContent = `${fmt.format(major)} m`;
     minorEl.textContent = `${fmt.format(minor)} m`;
     const key = `${lo}:${hi}`;

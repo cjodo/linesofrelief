@@ -759,7 +759,7 @@ async function acceptScene(msg: SceneResult) {
   range ??= { lo: scene.lo, hi: scene.hi };
   exportButton.disabled = false;
   atlas.addPeaks(msg.labels, msg.originX, msg.originY, msg.z);
-  const museums = labels.some((l) => l.kind === 'museum');
+  const museums = labels.filter((l) => l.kind === 'museum').length;
   updateLegend(scene.lo, scene.hi, scene.minor, scene.major, museums);
   if (!document.body.classList.contains('loaded')) settleArrival();
   reveal();
