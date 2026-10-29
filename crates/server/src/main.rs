@@ -28,9 +28,10 @@ use axum::{
     routing::get,
     Router,
 };
+use bytes::BytesMut;
+use rayon::prelude::*;
 use redis::{aio::ConnectionManager, AsyncCommands};
 use serde::Deserialize;
-use bytes::BytesMut;
 use tokio::sync::{OnceCell, RwLock, Semaphore};
 use tower_http::{compression::CompressionLayer, services::ServeDir};
 
@@ -349,21 +350,27 @@ async fn museums_in(app: &Shared, z: u32, x: u32, y: u32) -> Result<Bytes, BoxEr
         let (tx, ty, body) = done??;
         let Some(layer) = mvt::points(&body, "poi", &want) else { continue };
         let extent = i64::from(layer.extent);
-        for p in layer.points {
-            // Points in the buffer belong to (and are listed by) a neighbour.
-            let inside = (0..extent).contains(&p.x) && (0..extent).contains(&p.y);
-            let mut museum = p.properties;
-            if !inside || !museum.contains_key("name") {
-                continue;
-            }
-            let fx = f64::from(tx) + p.x as f64 / extent as f64;
-            let fy = f64::from(ty) + p.y as f64 / extent as f64;
-            let (lat, lon) = lat_lon(MUSEUM_SOURCE_ZOOM, fx, fy);
-            // ~10 cm: plenty, and keeps the answer small.
-            museum.insert("lat".into(), ((lat * 1e6).round() / 1e6).into());
-            museum.insert("lon".into(), ((lon * 1e6).round() / 1e6).into());
-            out.push(serde_json::Value::Object(museum));
-        }
+        
+        // Process points in parallel using rayon
+        let mut museums: Vec<serde_json::Value> = layer.points.into_par_iter()
+            .filter_map(|p| {
+                // Points in the buffer belong to (and are listed by) a neighbour.
+                let inside = (0..extent).contains(&p.x) && (0..extent).contains(&p.y);
+                let mut museum = p.properties;
+                if !inside || !museum.contains_key("name") {
+                    return None;
+                }
+                let fx = f64::from(tx) + p.x as f64 / extent as f64;
+                let fy = f64::from(ty) + p.y as f64 / extent as f64;
+                let (lat, lon) = lat_lon(MUSEUM_SOURCE_ZOOM, fx, fy);
+                // ~10 cm: plenty, and keeps the answer small.
+                museum.insert("lat".into(), ((lat * 1e6).round() / 1e6).into());
+                museum.insert("lon".into(), ((lon * 1e6).round() / 1e6).into());
+                Some(serde_json::Value::Object(museum))
+            })
+            .collect();
+        
+        out.append(&mut museums);
     }
     Ok(Bytes::from(serde_json::to_vec(&out)?))
 }

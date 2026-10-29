@@ -14,6 +14,9 @@ pub struct Point {
     pub y: i64,
 }
 
+// Ensure Point is Send for rayon parallelism
+unsafe impl Send for Point {}
+
 pub struct Layer {
     pub extent: u32,
     pub points: Vec<Point>,
