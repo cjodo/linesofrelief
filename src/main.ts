@@ -75,7 +75,7 @@ const showCoords = createCoordEntry(document.querySelector<HTMLInputElement>('#c
 });
 const updateLegend = createLegend(
   document.querySelector<HTMLElement>('#legend')!,
-  (kind) => findNearest(kind),
+  (kind) => (kind === 'museum' ? visitNearestMuseum() : findNearest(kind)),
   (row, at) => legendMuseums(row, at),
 );
 const intro = document.querySelector<HTMLElement>('#intro')!;
@@ -992,20 +992,38 @@ function legendMuseums(row: Rect | null, at: Point) {
   collection.hover(row ? nearbyTarget(row) : null, at);
 }
 
-function nearbyTarget(anchor: Rect): TownTarget | null {
+/**
+ * Every museum the map around the view has (drawn or not), nearest the
+ * centre of the view first, with the town each belongs to.
+ */
+function nearbyMuseums() {
   if (!scene || !lastScene || scene.zoom !== zoom) return null;
   const s = scene;
-  // Every museum the map around the view has, drawn or not.
-  const all = lastScene.labels.filter((l) => l.kind === 'museum');
-  if (all.length < 2) return null;
   const townOf = new Map<string, string>();
   for (const p of s.features.labels) for (const m of p.museums ?? []) townOf.set(m.name, p.label.name);
   const [vx, vy] = [cx - s.originX, cy - s.originY];
   const far = (m: Label) => Math.hypot(m.x - vx, m.y - vy);
+  const museums = lastScene.labels.filter((l) => l.kind === 'museum').sort((a, b) => far(a) - far(b));
+  return { museums, townOf, scene: s };
+}
+
+/** The legend's museum row, clicked: the museum nearest the centre of the view, and its card. */
+function visitNearestMuseum() {
+  const near = nearbyMuseums();
+  const m = near?.museums[0];
+  if (!near || !m) return findNearest('museum');
+  const s = near.scene;
+  visitMuseum(m.name, near.townOf.get(m.name), s.originX + m.x, s.originY + m.y);
+}
+
+function nearbyTarget(anchor: Rect): TownTarget | null {
+  const near = nearbyMuseums();
+  if (!near || near.museums.length < 2) return null;
+  const { museums, townOf, scene: s } = near;
   return {
     key: 'legend:museums',
     town: 'Nearby',
-    museums: [...all].sort((a, b) => far(a) - far(b)),
+    museums,
     anchor,
     describe: (m) => museumInfo(museumSpot(m, townOf.get(m.name), s)),
     pick: (m) => visitMuseum(m.name, townOf.get(m.name), s.originX + m.x, s.originY + m.y),
