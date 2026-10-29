@@ -1,4 +1,4 @@
-import { DEFAULT_ZOOM, DS, INTERVALS, TILE } from './config';
+import { DEFAULT_ZOOM, DETAIL, INTERVALS, TILE } from './config';
 import type { SceneRequest, SceneResult, TileFeatures } from './scene-build';
 import type { Geometry, Label } from './tiles';
 import { lonLatToWorld } from './tiles';
@@ -25,7 +25,8 @@ export function favoriteRequest(f: Favorite): SceneRequest {
   return {
     id: 0,
     z: DEFAULT_ZOOM,
-    ds: DS,
+    ds: DETAIL[DEFAULT_ZOOM].ds,
+    vectorDrop: DETAIL[DEFAULT_ZOOM].vectorDrop,
     interval: INTERVALS[DEFAULT_ZOOM],
     features: true,
     tx0: Math.floor((x - VIEW_W / 2 - MARGIN) / TILE),
@@ -72,6 +73,8 @@ const GEO_KEYS: GeoKey[] = ['ocean', 'lake', 'river', 'border'];
 interface Header {
   z: number;
   interval: number;
+  /** Absent in bundles made before per-zoom detail; those used ds 2. */
+  ds?: number;
   originX: number;
   originY: number;
   width: number;
@@ -89,6 +92,7 @@ export function encodeScene(r: SceneResult): Uint8Array {
   const header: Header = {
     z: r.z,
     interval: r.interval,
+    ds: r.ds,
     originX: r.originX,
     originY: r.originY,
     width: r.width,
@@ -177,6 +181,7 @@ export function decodeScene(buf: ArrayBuffer, id: number): SceneResult {
     id,
     z: header.z,
     interval: header.interval,
+    ds: header.ds ?? 2,
     originX: header.originX,
     originY: header.originY,
     width: header.width,

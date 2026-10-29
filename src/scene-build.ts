@@ -18,8 +18,8 @@ export interface SceneRequest {
   ds: number;
   /** Contour interval in metres. */
   interval: number;
-  /** Take map tiles one zoom coarser (zoomed-out views: a quarter of the requests). */
-  coarseVectors?: boolean;
+  /** Take map tiles this many zooms coarser (wide views: ×4 fewer requests per step). */
+  vectorDrop?: number;
   /** Also load water, borders and names. Off for the coarse preview. */
   features: boolean;
 }
@@ -43,9 +43,10 @@ export interface TileFeatures extends Omit<VectorData, 'labels'> {
 export interface SceneResult {
   type: 'scene';
   id: number;
-  /** Tile zoom and contour interval it was built with. */
+  /** Tile zoom, contour interval and grid downsampling it was built with. */
   z: number;
   interval: number;
+  ds: number;
   /** World-pixel origin and size of the region. */
   originX: number;
   originY: number;
@@ -137,12 +138,12 @@ export async function buildRegion(
   load: Loaders,
   onTile: (done: number, total: number) => void = () => {},
 ): Promise<SceneResult> {
-  const { id, z, tx0, ty0, tx1, ty1, ds, features, interval, coarseVectors } = req;
+  const { id, z, tx0, ty0, tx1, ty1, ds, features, interval, vectorDrop = 0 } = req;
 
-  // Elevation one zoom coarser does the kernel's 2×2 averaging for free: the
-  // same contour grid from a quarter of the tiles. `ef` is scene px per
-  // elevation-tile px; the region snaps outward to whole coarse tiles.
-  const ef = ds >= 2 ? 2 : 1;
+  // Elevation log2(ds) zooms coarser does the downsampling for free: one
+  // elevation pixel per grid cell, from 1/ds² of the tiles. `ef` is scene px
+  // per elevation-tile px; the region snaps outward to whole coarse tiles.
+  const ef = Math.min(ds, 2 ** z);
   const ez = z - Math.log2(ef);
   const ex0 = Math.floor(tx0 / ef);
   const ey0 = Math.floor(ty0 / ef);
@@ -152,7 +153,7 @@ export async function buildRegion(
   const originY = ey0 * TILE * ef;
 
   // Map tiles: the scene's own zoom, or one coarser when zoomed out.
-  const vf = coarseVectors ? 2 : 1;
+  const vf = 2 ** Math.min(vectorDrop, z);
   const vz = z - Math.log2(vf);
   const vx0 = Math.floor(tx0 / vf);
   const vy0 = Math.floor(ty0 / vf);
@@ -198,6 +199,7 @@ export async function buildRegion(
     id,
     z,
     interval,
+    ds,
     originX,
     originY,
     width: ecols * TILE * ef,

@@ -1,4 +1,4 @@
-import { DEFAULT_ZOOM, DS, INTERVALS, MONO, SERIF, START, TILE, ZOOMS } from './config';
+import { DEFAULT_ZOOM, DETAIL, INTERVALS, MONO, SERIF, START, TILE, ZOOMS } from './config';
 import type {
   NameRequest,
   NameResult,
@@ -29,8 +29,6 @@ const MARGIN = 256;
 const TRIGGER = 192;
 /** Extra reach in the direction of travel, at full speed. */
 const LEAD_MAX = 256;
-/** At or below this zoom, map tiles come one zoom coarser (a quarter of the requests). */
-const COARSE_VECTORS_BELOW = 12;
 /** How strongly recent pan speed turns into lead (per move event). */
 const LEAD_GAIN = 6;
 /**
@@ -220,7 +218,7 @@ function request(z: number, k: number, ds: number, features: boolean): SceneRequ
     features,
     // The view's interval, also for the coarse preview, so line weights match.
     interval: INTERVALS[zoom],
-    coarseVectors: features && z < COARSE_VECTORS_BELOW,
+    vectorDrop: features ? DETAIL[zoom].vectorDrop : 0,
     tx0: Math.floor(x0 / TILE),
     tx1: Math.floor(x1 / TILE),
     ty0: Math.max(0, Math.floor(y0 / TILE)),
@@ -236,7 +234,7 @@ function ensure() {
   // tiles), rather than queued behind.
   if (detailId !== -1 && covers(pending)) return;
   document.body.classList.add('busy');
-  const req = request(zoom, 1, DS, true);
+  const req = request(zoom, 1, DETAIL[zoom].ds, true);
   detailId = req.id;
   pending = {
     zoom,
@@ -421,6 +419,9 @@ async function loadFavorite(f: Favorite) {
 
 /** Queue the coarse preview ahead of the detailed request so it paints first. */
 function requestPreview() {
+  // Where the detailed map is already this coarse, a preview would only fetch
+  // finer elevation than the map itself uses: let the map come straight in.
+  if (DETAIL[zoom].ds >= PREVIEW_SCALE) return;
   const first = request(zoom - PREVIEW_DROP, PREVIEW_SCALE, 1, false);
   previewId = first.id;
   worker.postMessage(first);
@@ -571,7 +572,7 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   if (msg.type === 'named') return msg.id === regionId ? regionNamed(msg) : named(msg);
   if (msg.id === previewId) {
     if (msg.type === 'scene' && !scene) {
-      preview = buildScene(msg, emptyFeatures, 1);
+      preview = buildScene(msg, emptyFeatures, msg.ds);
       previewCanvas.classList.add('ready');
       requestDraw();
     }
@@ -597,7 +598,7 @@ async function acceptScene(msg: SceneResult) {
   lastScene = msg;
   // One colour scale per arrival; re-fit only on reaching wholly new terrain.
   if (range && (msg.max < range.lo || msg.min > range.hi)) range = null;
-  scene = buildScene(msg, features, DS, range ?? undefined);
+  scene = buildScene(msg, features, msg.ds, range ?? undefined);
   range ??= { lo: scene.lo, hi: scene.hi };
   exportButton.disabled = false;
   atlas.addPeaks(msg.labels, msg.originX, msg.originY, msg.z);

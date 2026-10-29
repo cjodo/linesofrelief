@@ -15,6 +15,23 @@ export const TILE = 256;
 export const DS = 2;
 
 /**
+ * How much detail each zoom fetches. `ds`: screen px per elevation sample, so
+ * elevation comes log2(ds) zooms coarser (×4 fewer tiles per step). `vectorDrop`:
+ * how many zooms coarser the map tiles come. Close in, the full resolution the
+ * screen can show; far out, a few basic tiles: the widest views use about a
+ * sixteenth of the elevation requests and their contours stay smooth, because
+ * the intervals there are hundreds of metres.
+ */
+export const DETAIL: Record<number, { ds: number; vectorDrop: number }> = {
+  13: { ds: 2, vectorDrop: 0 },
+  12: { ds: 2, vectorDrop: 0 },
+  11: { ds: 2, vectorDrop: 1 },
+  10: { ds: 4, vectorDrop: 1 },
+  9: { ds: 4, vectorDrop: 2 },
+  8: { ds: 8, vectorDrop: 2 },
+};
+
+/**
  * Contour interval in metres at each zoom; every INDEX_EVERY-th is an index
  * line. It doubles per step near the default, then grows more gently: the
  * coarse elevation behind the widest views smooths summits, so strict
