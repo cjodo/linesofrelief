@@ -563,7 +563,7 @@ ${analyticsHtml()}
 ${body}
       <footer>
         <a href="/">Search the whole world →</a>
-        <a href="/mountains/">All summits</a>
+        <a href="/mountains/">Summits</a>
         <a href="/why/">Why this map</a>
         ${summit ? `<a href="${mapPath(summit)}">${esc(summit.name)} on the live map</a>` : ''}
         <a href="#" class="consent-link" data-consent>Cookies</a>
