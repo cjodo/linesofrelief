@@ -168,6 +168,8 @@ export function terrariumToElevation(px: ArrayLike<number>, channels: number): F
 }
 
 /** Elevation in metres for a tile, row-major TILE×TILE. Never rejects. */
+export function loadElevation(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<Float32Array>;
+export function loadElevation(z: number, x: number, y: number, group?: Group): Promise<Float32Array>;
 export function loadElevation(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<Float32Array> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(flat);
@@ -324,6 +326,8 @@ const MUSEUM_BACKOFF_MS = 60_000;
 let museumsDownUntil = 0;
 
 /** Museums in a map tile, in tile pixels; none at wide zooms. Never rejects. */
+export function loadMuseums(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<Label[]>;
+export function loadMuseums(z: number, x: number, y: number, group?: Group): Promise<Label[]>;
 export function loadMuseums(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<Label[]> {
   const t = z >= MUSEUM_MIN_ZOOM ? normalize(z, x, y) : null;
   if (!t || Date.now() < museumsDownUntil) return Promise.resolve([]);
@@ -349,6 +353,8 @@ export function loadMuseums(z: number, x: number, y: number, group?: Group, sign
 const vectors = new Map<string, Promise<VectorData>>();
 
 /** Water, borders and names for a tile, in tile pixels. Never rejects. */
+export function loadVector(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<VectorData>;
+export function loadVector(z: number, x: number, y: number, group?: Group): Promise<VectorData>;
 export function loadVector(z: number, x: number, y: number, group?: Group, signal?: AbortSignal): Promise<VectorData> {
   const t = normalize(z, x, y);
   if (!t) return Promise.resolve(emptyVector);
