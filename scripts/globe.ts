@@ -35,7 +35,7 @@ const INTERVAL = 500;
 const PEAK = 6000;
 /** Degrees between the faint latitude and longitude lines. */
 const GRATICULE = 30;
-/** Colour steps up the ramp (the palette holds 3 + STEPS colours). */
+/** Colour steps up the ramp. */
 const STEPS = 48;
 /** Web mercator stops here: nearer the poles there's no data, so no lines
  * (Antarctica's plateau runs on as plain land, the Arctic as plain sea). */
@@ -124,54 +124,84 @@ const hex = (h: string): RGB => {
 };
 const css = (c: string): RGB => c.match(/\d+/g)!.slice(0, 3).map(Number) as RGB;
 
-// Colours and their opacity: the ground is clear, so only lines show.
-const palette: RGB[] = [
-  hex(INK.base), // 0: nothing (transparent)
-  css(ramp(0.5)), // 1: graticule
-  hex(INK.shore), // 2: coastline
-];
-const alphas = [0, 70, 235];
+// Colours and their opacity: the ground is clear, so only lines show. Each
+// colour comes in COVER strengths, for the soft edges of anti-aliased lines.
+/** Coverage levels per colour: a line's edge fades over these. */
+const COVER = 4;
+/** Lines are this many texels across (their soft edge adds about one more). */
+const LINE = 1.1;
+
+const palette: RGB[] = [hex(INK.base)]; // 0: nothing (transparent)
+const alphas = [0];
+/** Add a colour at full strength `alpha` (0-1); returns its first index. */
+function colour(rgb: RGB, alpha: number) {
+  const first = palette.length;
+  for (let q = 1; q <= COVER; q++) {
+    palette.push(rgb);
+    alphas.push(Math.round(255 * alpha * (q / COVER)));
+  }
+  return first;
+}
+const GRID = colour(css(ramp(0.5)), 0.3);
+const COAST = colour(hex(INK.shore), 0.92);
 const RAMP0 = palette.length;
 for (let s = 0; s < STEPS; s++) {
   const t = s / (STEPS - 1);
-  palette.push(css(ramp(t)));
   // Lowlands recede, high ground glows: the map's wide-view relief emphasis.
-  alphas.push(Math.round(255 * (0.35 + 0.65 * t)));
+  colour(css(ramp(t)), 0.35 + 0.65 * t);
 }
 
 // --- Lines -------------------------------------------------------------------------
+//
+// Each texel's coverage comes from its distance to the nearest line, measured
+// in texels (a field's distance from a level, over the field's gradient), so
+// lines have soft edges rather than stair-stepped ones.
 
-/** Contour band of texel `i`; the sea (under half land) is its own band, below every line. */
-const band = (i: number) => (land[i] < 0.5 ? -1 : Math.floor(Math.max(0, elev[i]) / INTERVAL));
+/** How much a line `d` texels away covers this texel. */
+const cover = (d: number) => Math.max(0, Math.min(1, LINE / 2 + 0.5 - d));
+
+/** Gradient length of `f` at texel (x, y), per texel (wrapping east-west). */
+function gradient(f: Float32Array, x: number, y: number) {
+  const row = y * W;
+  const gx = (f[row + ((x + 1) % W)] - f[row + ((x - 1 + W) % W)]) / 2;
+  const gy = (f[Math.min(H - 1, y + 1) * W + x] - f[Math.max(0, y - 1) * W + x]) / 2;
+  return Math.hypot(gx, gy);
+}
+
+/** Texels from (lat or lon) `deg` to the nearest graticule line, at `texel` degrees per texel. */
+const toGrid = (deg: number, texel: number) =>
+  (Math.abs(deg / GRATICULE - Math.round(deg / GRATICULE)) * GRATICULE) / texel;
 
 const out = new Uint8Array(W * H);
 for (let y = 0; y < H; y++) {
   const lat = 90 - ((y + 0.5) / H) * 180;
-  // Where a parallel of the graticule runs (to within half a texel).
-  const parallel = Math.abs(lat / GRATICULE - Math.round(lat / GRATICULE)) * GRATICULE < 90 / H;
-  if (Math.abs(lat) > MAX_LAT) {
-    out.fill(parallel ? 1 : 0, y * W, (y + 1) * W);
-    continue;
-  }
+  const parallel = cover(toGrid(lat, 180 / H));
+  const polar = Math.abs(lat) > MAX_LAT;
   for (let x = 0; x < W; x++) {
     const i = y * W + x;
-    const e = elev[i];
-    const b = band(i);
-    // A line where this texel's band differs from its right or lower neighbour.
-    const [ri, bi] = [y * W + ((x + 1) % W), y + 1 < H ? i + W : i];
-    const [right, below] = [elev[ri], elev[bi]];
-    const [br, bb] = [band(ri), band(bi)];
-    if (b === br && b === bb) {
-      const lon = ((x + 0.5) / W) * 360 - 180;
-      const meridian = Math.abs(lon / GRATICULE - Math.round(lon / GRATICULE)) * GRATICULE < 180 / W;
-      out[i] = parallel || meridian ? 1 : 0;
-    } else if (b < 0 || br < 0 || bb < 0) {
-      out[i] = 2;
-    } else {
-      const top = Math.max(e, right, below);
-      const t = Math.min(1, (Math.floor(top / INTERVAL) * INTERVAL) / PEAK);
-      out[i] = RAMP0 + Math.round(t * (STEPS - 1));
+    const lon = ((x + 0.5) / W) * 360 - 180;
+    const grid = Math.max(parallel, cover(toGrid(lon, 360 / W)));
+    let first = GRID;
+    let c = grid;
+    if (!polar) {
+      // The coast: where the land share crosses half.
+      const coast = cover(Math.abs(land[i] - 0.5) / Math.max(1e-6, gradient(land, x, y)));
+      // Contours: inland, the nearest level above sea.
+      let contour = 0;
+      let level = 0;
+      if (land[i] >= 0.5) {
+        level = Math.max(INTERVAL, Math.round(elev[i] / INTERVAL) * INTERVAL);
+        contour = cover(Math.abs(elev[i] - level) / Math.max(1e-6, gradient(elev, x, y)));
+      }
+      // Coast over contours over the graticule.
+      if (coast > 0) [first, c] = [COAST, coast];
+      else if (contour > 0) {
+        const t = Math.min(1, level / PEAK);
+        [first, c] = [RAMP0 + Math.round(t * (STEPS - 1)) * COVER, contour];
+      }
     }
+    const q = Math.round(c * COVER);
+    out[i] = q === 0 ? 0 : first + q - 1;
   }
 }
 
