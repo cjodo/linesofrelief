@@ -34,7 +34,7 @@ import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
 import { createCollection } from './collection';
 import { buildScene, draw, type Scene } from './render';
-import { createSearch, type Place } from './search';
+import { createSearch } from './search';
 import { track } from './analytics';
 import { greet } from './banner';
 import { PEAKS } from '../site/peaks';
@@ -1082,7 +1082,7 @@ window.addEventListener(
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 window.addEventListener('resize', resize);
-createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) => {
+const fitPlaceholder = createSearch(document.querySelector<HTMLElement>('#search')!, (place) => {
   track('search_select', { kind: place.kind, name: place.name });
   // Typed coordinates carry no name: the map names the place it lands on.
   const spot = place.kind === 'coordinates' ? { lat: place.lat, lon: place.lon } : place;
@@ -1100,6 +1100,7 @@ let lastScene: SceneResult | null = null;
 setLabelScale(storedScale());
 createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
   setLabelScale(scale);
+  fitPlaceholder();
   if (!scene || !lastScene) return;
   const m = lastScene;
   const keep = new Set(scene.features.labels.map((p) => labelKey(p.label)));

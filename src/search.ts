@@ -99,10 +99,28 @@ async function query(q: string, signal: AbortSignal): Promise<Place[]> {
   return ranked;
 }
 
+/** Longest first: the box shows the longest that fits at its width and text size. */
+const PLACEHOLDERS = ['Find a peak, lake, town or country', 'Find a peak, lake or town', 'Find a place'];
+let measure: CanvasRenderingContext2D | null = null;
+
+function fitPlaceholder(input: HTMLInputElement) {
+  const cs = getComputedStyle(input);
+  const room = input.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  if (room <= 0) return;
+  measure ??= document.createElement('canvas').getContext('2d')!;
+  measure.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  measure.letterSpacing = cs.letterSpacing;
+  input.placeholder =
+    PLACEHOLDERS.find((p) => measure!.measureText(p).width <= room) ?? PLACEHOLDERS.at(-1)!;
+}
+
 const escape = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-/** Wires the search box; `onPick` receives the chosen place. */
+/**
+ * Wires the search box; `onPick` receives the chosen place. Returns a hook to
+ * re-fit the placeholder after the text size changes.
+ */
 export function createSearch(root: HTMLElement, onPick: (place: Place) => void) {
   const input = root.querySelector<HTMLInputElement>('input')!;
   const list = root.querySelector<HTMLUListElement>('ul')!;
@@ -208,5 +226,11 @@ export function createSearch(root: HTMLElement, onPick: (place: Place) => void) 
     }
   });
 
+  // The placeholder shortens to fit: narrow screens, larger text.
+  const fit = () => fitPlaceholder(input);
+  new ResizeObserver(fit).observe(input);
+  document.fonts.ready.then(fit, () => {});
+
   close();
+  return fit;
 }
