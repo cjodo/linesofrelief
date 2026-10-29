@@ -6,6 +6,11 @@ import { ramp } from './render';
 
 const fmt = new Intl.NumberFormat('en-US');
 
+/** Where the legend folds into a chip and opens as a sheet (the CSS's own query). */
+const PHONE = matchMedia('(max-width: 520px), (max-height: 600px)');
+/** On larger screens it folds to its header and colours instead; remembered per browser. */
+const FOLDED = 'topography:legend-folded';
+
 /** A legend row that finds its feature: the nearest one, on click. */
 const find = (kind: FindKind, noun: string) =>
   `<div class="find" role="button" tabindex="0" data-find="${kind}" title="Go to the nearest ${noun}">`;
@@ -74,15 +79,44 @@ export function createLegend(
           <path transform="translate(6 0)" d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/>
         </svg></dt><dd>museum <span class="near"></span></dd></div>
     </dl>
-    </div>`;
+    </div>
+    <div class="legend-ramp" aria-hidden="true"></div>`;
 
-  // On phones the legend folds into a chip; the header toggles it.
+  // The header toggles it: on phones a chip opening into a sheet, elsewhere
+  // the whole legend folding to its header with its colours along the bottom.
   const head = root.querySelector<HTMLButtonElement>('.legend-head')!;
+  const body = root.querySelector<HTMLElement>('.legend-body')!;
+  const sync = () => {
+    const folded = !PHONE.matches && root.classList.contains('folded');
+    const open = PHONE.matches ? root.classList.contains('open') : !folded;
+    head.setAttribute('aria-expanded', String(open));
+    // A folded body's rows can't be reached by Tab either.
+    body.inert = folded;
+  };
   const setOpen = (open: boolean) => {
     root.classList.toggle('open', open);
-    head.setAttribute('aria-expanded', String(open));
+    sync();
   };
-  head.addEventListener('click', () => setOpen(!root.classList.contains('open')));
+  const setFolded = (folded: boolean) => {
+    root.classList.toggle('folded', folded);
+    sync();
+    try {
+      localStorage.setItem(FOLDED, folded ? '1' : '0');
+    } catch {
+      // private mode: the choice just won't be remembered
+    }
+  };
+  try {
+    root.classList.toggle('folded', localStorage.getItem(FOLDED) === '1');
+  } catch {
+    // no storage: start unfolded
+  }
+  sync();
+  PHONE.addEventListener('change', sync);
+  head.addEventListener('click', () => {
+    if (PHONE.matches) setOpen(!root.classList.contains('open'));
+    else setFolded(!root.classList.contains('folded'));
+  });
 
   // On a phone the open sheet covers the map: fold it to show the trip.
   const go = (row: HTMLElement) => {
@@ -106,6 +140,8 @@ export function createLegend(
   const gradient = Array.from({ length: 13 }, (_, i) => `${ramp(i / 12)} ${(i / 12) * 100}%`);
   bar.style.background = `linear-gradient(to top, ${gradient.join(', ')})`;
   root.querySelector<HTMLElement>('.mini')!.style.background =
+    `linear-gradient(to right, ${gradient.join(', ')})`;
+  root.querySelector<HTMLElement>('.legend-ramp')!.style.background =
     `linear-gradient(to right, ${gradient.join(', ')})`;
 
   let shown = '';
