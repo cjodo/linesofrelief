@@ -12,9 +12,15 @@
 mod museum_info;
 mod mvt;
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
 use axum::{
+    body::Bytes,
     extract::{Path, Query, Request, State},
     http::{header, HeaderValue, StatusCode},
     middleware::{self, Next},
@@ -24,7 +30,8 @@ use axum::{
 };
 use redis::{aio::ConnectionManager, AsyncCommands};
 use serde::Deserialize;
-use tokio::sync::OnceCell;
+use bytes::BytesMut;
+use tokio::sync::{OnceCell, RwLock, Semaphore};
 use tower_http::{compression::CompressionLayer, services::ServeDir};
 
 const TERRAIN: &str = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
@@ -52,6 +59,16 @@ const REDIS_CONNECT: Duration = Duration::from_secs(3);
 const REDIS_OP: Duration = Duration::from_millis(500);
 /// An empty GeoJSON FeatureCollection is ~44 bytes; tiles are far larger.
 const EMPTY_BYTES: usize = 64;
+
+/// Upstream requests in flight at once, across every route. Bounds memory (each
+/// holds a body) and keeps a burst of museum tiles (16 z14 fetches each) polite.
+const UPSTREAM_SLOTS: usize = 32;
+/// The most any one upstream answer may be; the largest z14 tiles are ~1 MB.
+const MAX_BODY: usize = 16 << 20;
+/// OpenFreeMap retires old weekly releases, so its versioned URL is re-read daily,
+const TEMPLATE_TTL: Duration = Duration::from_secs(DAY);
+/// and a failed re-read keeps the old one and tries again after this.
+const TEMPLATE_RETRY: Duration = Duration::from_secs(600);
 
 /// How long each kind of object lives in Redis, and in browsers.
 struct Policy {
@@ -99,11 +116,17 @@ const MUSEUM_INFO_POLICY: Policy = Policy {
     content_type: "application/json",
 };
 
+/// One miss being made: everyone asking for its key meanwhile waits on it.
+type InFlight = Arc<OnceCell<Option<Bytes>>>;
+
 struct App {
     http: reqwest::Client,
     redis: Option<ConnectionManager>,
-    /// Versioned OpenFreeMap tile URL template, resolved once.
-    vector_template: OnceCell<String>,
+    /// OpenFreeMap's versioned tile URL template, and when it was read.
+    vector_template: RwLock<Option<(Arc<str>, Instant)>>,
+    upstream: Semaphore,
+    /// Misses being made right now, by cache key.
+    in_flight: Mutex<HashMap<String, InFlight>>,
 }
 
 type Shared = Arc<App>;
@@ -139,11 +162,18 @@ async fn main() {
     let app = Arc::new(App {
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
+            // A dead host fails fast instead of holding the request 20 s.
+            .connect_timeout(Duration::from_secs(5))
+            // Upstreams are few and hot: keep their connections warm.
+            .tcp_keepalive(Duration::from_secs(60))
+            .pool_idle_timeout(Duration::from_secs(90))
             .user_agent("topography-server (contour map tile cache)")
             .build()
             .expect("http client"),
         redis,
-        vector_template: OnceCell::new(),
+        vector_template: RwLock::new(None),
+        upstream: Semaphore::new(UPSTREAM_SLOTS),
+        in_flight: Mutex::new(HashMap::new()),
     });
 
     let router = Router::new()
@@ -209,21 +239,50 @@ async fn vector(State(app): State<Shared>, Path((z, x, file)): Path<(u32, u32, S
 
 /// OpenFreeMap's URL for a tile in its current weekly release.
 async fn vector_url(app: &App, z: u32, x: u32, y: u32) -> Result<String, BoxError> {
-    let template = app
-        .vector_template
-        .get_or_try_init(|| async {
-            #[derive(Deserialize)]
-            struct TileJson {
-                tiles: Vec<String>,
-            }
-            let tj: TileJson = app.http.get(VECTOR_TILEJSON).send().await?.json().await?;
-            tj.tiles.into_iter().next().ok_or_else(|| BoxError::from("empty tilejson"))
-        })
-        .await?;
+    let template = vector_template(app).await?;
     Ok(template
         .replace("{z}", &z.to_string())
         .replace("{x}", &x.to_string())
         .replace("{y}", &y.to_string()))
+}
+
+/// The tile URL template, re-read from OpenFreeMap's TileJSON once a day.
+async fn vector_template(app: &App) -> Result<Arc<str>, BoxError> {
+    if let Some((template, at)) = &*app.vector_template.read().await {
+        if at.elapsed() < TEMPLATE_TTL {
+            return Ok(template.clone());
+        }
+    }
+    // One re-read at a time; whoever waited behind it finds it fresh.
+    let mut slot = app.vector_template.write().await;
+    if let Some((template, at)) = &*slot {
+        if at.elapsed() < TEMPLATE_TTL {
+            return Ok(template.clone());
+        }
+    }
+    #[derive(Deserialize)]
+    struct TileJson {
+        tiles: Vec<String>,
+    }
+    let read = async {
+        let tj: TileJson = app.http.get(VECTOR_TILEJSON).send().await?.error_for_status()?.json().await?;
+        tj.tiles.into_iter().next().map(Arc::from).ok_or_else(|| BoxError::from("empty tilejson"))
+    };
+    match read.await {
+        Ok(template) => {
+            *slot = Some((Arc::clone(&template), Instant::now()));
+            Ok(template)
+        }
+        // Last week's release still serves for a while: keep it, retry soon.
+        Err(e) => match slot.as_mut() {
+            Some((template, at)) => {
+                eprintln!("tilejson: {e}; keeping the previous release");
+                *at = Instant::now() - (TEMPLATE_TTL - TEMPLATE_RETRY);
+                Ok(template.clone())
+            }
+            None => Err(e),
+        },
+    }
 }
 
 /// Museums in a map tile, at the zooms the map shows them: a JSON array of
@@ -254,7 +313,7 @@ async fn museum_info(State(app): State<Shared>, Query(q): Query<MuseumQuery>) ->
     let key = format!("museum-info:v1:{}@{lat},{lon}", name.to_lowercase());
     cached_body(&app, &key, &MUSEUM_INFO_POLICY, || async {
         let info = museum_info::lookup(&app.http, name, lat, lon).await?;
-        Ok(serde_json::to_vec(&info)?)
+        Ok(Bytes::from(serde_json::to_vec(&info)?))
     })
     .await
 }
@@ -264,7 +323,7 @@ async fn museum_info(State(app): State<Shared>, Query(q): Query<MuseumQuery>) ->
 /// so a partial list is never cached. The fields are the OpenMapTiles poi
 /// layer's (https://openmaptiles.org/schema/#poi); README "Server API" has
 /// the response.
-async fn museums_in(app: &Shared, z: u32, x: u32, y: u32) -> Result<Vec<u8>, BoxError> {
+async fn museums_in(app: &Shared, z: u32, x: u32, y: u32) -> Result<Bytes, BoxError> {
     let k = 1 << (MUSEUM_SOURCE_ZOOM - z);
     let mut tiles = tokio::task::JoinSet::new();
     for n in 0..k * k {
@@ -275,24 +334,18 @@ async fn museums_in(app: &Shared, z: u32, x: u32, y: u32) -> Result<Vec<u8>, Box
             Ok::<_, BoxError>((tx, ty, fetch(&app, &url).await?))
         });
     }
+    let want = mvt::Want { key: "class", value: "museum", keep: &["name", "name:en", "name:latin", "rank"] };
     let mut out = Vec::new();
     while let Some(done) = tiles.join_next().await {
+        // Each tile is read and dropped as it lands: only the museums stay.
         let (tx, ty, body) = done??;
-        let Some(layer) = mvt::points(&body, "poi") else { continue };
+        let Some(layer) = mvt::points(&body, "poi", &want) else { continue };
         let extent = i64::from(layer.extent);
         for p in layer.points {
             // Points in the buffer belong to (and are listed by) a neighbour.
             let inside = (0..extent).contains(&p.x) && (0..extent).contains(&p.y);
-            if !inside || p.properties.get("class").and_then(|c| c.as_str()) != Some("museum") {
-                continue;
-            }
-            let mut museum = serde_json::Map::new();
-            for key in ["name", "name:en", "name:latin", "rank"] {
-                if let Some(v) = p.properties.get(key) {
-                    museum.insert(key.into(), v.clone());
-                }
-            }
-            if !museum.contains_key("name") {
+            let mut museum = p.properties;
+            if !inside || !museum.contains_key("name") {
                 continue;
             }
             let fx = f64::from(tx) + p.x as f64 / extent as f64;
@@ -304,7 +357,7 @@ async fn museums_in(app: &Shared, z: u32, x: u32, y: u32) -> Result<Vec<u8>, Box
             out.push(serde_json::Value::Object(museum));
         }
     }
-    Ok(serde_json::to_vec(&out)?)
+    Ok(Bytes::from(serde_json::to_vec(&out)?))
 }
 
 #[derive(Deserialize)]
@@ -402,44 +455,84 @@ where
     cached_body(app, key, policy, || async { fetch(app, &upstream().await?).await }).await
 }
 
-async fn fetch(app: &App, url: &str) -> Result<Vec<u8>, BoxError> {
-    let res = app.http.get(url).send().await?.error_for_status()?;
-    Ok(res.bytes().await?.to_vec())
+/// GET an upstream URL, holding one of the upstream slots, refusing bodies
+/// over MAX_BODY. The body is read once into a buffer that becomes the
+/// response and the Redis value without another copy.
+async fn fetch(app: &App, url: &str) -> Result<Bytes, BoxError> {
+    let _slot = app.upstream.acquire().await?;
+    let mut res = app.http.get(url).send().await?.error_for_status()?;
+    let too_big = || BoxError::from(format!("body over {MAX_BODY} bytes"));
+    let hint = res.content_length().unwrap_or(0);
+    if hint > MAX_BODY as u64 {
+        return Err(too_big());
+    }
+    let mut body = BytesMut::with_capacity(hint as usize);
+    while let Some(chunk) = res.chunk().await? {
+        if body.len() + chunk.len() > MAX_BODY {
+            return Err(too_big());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body.freeze())
 }
 
-/// Serve `key` from Redis, or make the body once and store it.
+/// Serve `key` from Redis, or make the body once and store it. Concurrent
+/// misses for one key share a single `make` (a tile asked for by many
+/// visitors at once is fetched once, not once each).
 async fn cached_body<F, Fut>(app: &App, key: &str, policy: &Policy, make: F) -> Response
 where
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<Vec<u8>, BoxError>>,
+    Fut: std::future::Future<Output = Result<Bytes, BoxError>>,
 {
     if let Some(mut redis) = app.redis.clone() {
         let get = tokio::time::timeout(REDIS_OP, redis.get::<_, Option<Vec<u8>>>(key));
         if let Ok(Ok(Some(body))) = get.await {
-            return respond(body, policy, "hit");
+            return respond(Bytes::from(body), policy, "hit");
         }
     }
 
-    match make().await {
-        Ok(body) => {
-            if let Some(mut redis) = app.redis.clone() {
-                // Empty answers (no search hits, nothing nearby) are cheap to
-                // ask again and may change, so they only keep for a day.
-                let ttl = if body.len() < EMPTY_BYTES { policy.redis_ttl.min(DAY) } else { policy.redis_ttl };
-                // A failed or slow write only costs a refetch later.
-                let set = redis.set_ex::<_, _, ()>(key, body.as_slice(), ttl);
-                let _ = tokio::time::timeout(REDIS_OP, set).await;
+    // The lock is held only to look up or add the entry, never across an await.
+    let lock = || app.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+    let cell = lock().entry(key.to_owned()).or_default().clone();
+    // If the request making it is cancelled, the next waiter makes it instead.
+    let made = cell
+        .get_or_init(|| async {
+            match make().await {
+                Ok(body) => {
+                    store(app, key, policy, &body).await;
+                    Some(body)
+                }
+                Err(e) => {
+                    eprintln!("upstream {key}: {e}");
+                    None
+                }
             }
-            respond(body, policy, "miss")
+        })
+        .await
+        .clone();
+    {
+        let mut in_flight = lock();
+        if in_flight.get(key).is_some_and(|c| Arc::ptr_eq(c, &cell)) {
+            in_flight.remove(key);
         }
-        Err(e) => {
-            eprintln!("upstream {key}: {e}");
-            StatusCode::BAD_GATEWAY.into_response()
-        }
+    }
+    match made {
+        Some(body) => respond(body, policy, "miss"),
+        None => StatusCode::BAD_GATEWAY.into_response(),
     }
 }
 
-fn respond(body: Vec<u8>, policy: &Policy, cache: &'static str) -> Response {
+async fn store(app: &App, key: &str, policy: &Policy, body: &[u8]) {
+    let Some(mut redis) = app.redis.clone() else { return };
+    // Empty answers (no search hits, nothing nearby) are cheap to ask again
+    // and may change, so they only keep for a day.
+    let ttl = if body.len() < EMPTY_BYTES { policy.redis_ttl.min(DAY) } else { policy.redis_ttl };
+    // A failed or slow write only costs a refetch later.
+    let set = redis.set_ex::<_, _, ()>(key, body, ttl);
+    let _ = tokio::time::timeout(REDIS_OP, set).await;
+}
+
+fn respond(body: Bytes, policy: &Policy, cache: &'static str) -> Response {
     (
         [
             (header::CONTENT_TYPE, HeaderValue::from_static(policy.content_type)),
