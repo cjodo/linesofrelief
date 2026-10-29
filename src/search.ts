@@ -220,7 +220,8 @@ export function createSearch(root: HTMLElement, onPick: (place: Place) => void) 
   input.addEventListener('blur', () => setTimeout(close, 120));
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement !== input) {
+    // Not while typing in another box (coordinates may be split by a slash).
+    if (e.key === '/' && !(document.activeElement instanceof HTMLInputElement)) {
       e.preventDefault();
       input.focus();
     }

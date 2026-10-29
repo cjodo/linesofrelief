@@ -35,6 +35,7 @@ import { createLegend } from './legend';
 import { createCollection } from './collection';
 import { buildScene, draw, type Scene } from './render';
 import { createSearch } from './search';
+import { createCoordEntry } from './coord-entry';
 import { track } from './analytics';
 import { greet } from './banner';
 import { PEAKS } from '../site/peaks';
@@ -66,7 +67,10 @@ const canvas = document.querySelector<HTMLCanvasElement>('#map')!;
 const ctx = canvas.getContext('2d')!;
 const previewCanvas = document.querySelector<HTMLCanvasElement>('#preview')!;
 const pctx = previewCanvas.getContext('2d')!;
-const readout = document.querySelector<HTMLElement>('#coords')!;
+const showCoords = createCoordEntry(document.querySelector<HTMLInputElement>('#coords')!, (at) => {
+  track('coords_entry');
+  arrive(at, { push: true, announce: true, keepZoom: true });
+});
 const updateLegend = createLegend(document.querySelector<HTMLElement>('#legend')!, (kind) =>
   findNearest(kind),
 );
@@ -162,7 +166,7 @@ function requestDraw() {
       prerenderImg!.style.setProperty('--dy', `${arrival.y - cy}px`);
     }
     const { lat, lon } = worldToLonLat(cx, cy, zoom);
-    readout.textContent = formatLonLat(lat, lon);
+    showCoords(formatLonLat(lat, lon));
     minimap(cx, cy, zoom);
     showScale(lat);
     discover();
