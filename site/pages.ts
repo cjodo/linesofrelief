@@ -505,15 +505,17 @@ const PAGE_CSS = `
       }
       /* A landmark: its clay render standing on the page, glowing faintly, and
          beside it (below, on phones) its site model. Each takes width in
-         proportion to its shape (--ar), so the two stand the same height. */
+         proportion to its shape (--ar), so the two stand the same height.
+         The row runs nearly edge to edge: wide, sharp screens show them large. */
+      .page { --bleed: calc(50% - 50vw + max(16px, 2.5vw)); }
       .renders {
-        display: flex; gap: 24px; align-items: flex-end;
-        margin: 24px calc(50% - min(50vw - 16px, 640px)) 0;
+        display: flex; gap: max(24px, 2vw); align-items: flex-end;
+        margin: 24px var(--bleed) 0;
       }
       .renders figure { flex: var(--ar, 1) 1 0; min-width: 0; margin: 0; display: grid; justify-items: center; }
-      .renders img { display: block; width: 100%; height: auto; max-height: min(78vh, 760px); object-fit: contain; }
+      .renders img { display: block; width: 100%; height: auto; max-height: 86vh; object-fit: contain; }
       .renders-caption {
-        margin: 10px calc(50% - min(50vw - 16px, 640px)) 0; text-align: right;
+        margin: 10px var(--bleed) 0; text-align: right;
         font: 400 0.6rem/1.6 var(--mono); letter-spacing: 0.08em; color: var(--muted);
       }
       @media (max-width: 700px) {
