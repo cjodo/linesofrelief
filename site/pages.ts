@@ -384,6 +384,7 @@ export function analyticsHtml(): string {
 export function favoritesNav(): string {
   const items = FAVORITES.map((f) => {
     const q = new URLSearchParams({ name: f.name, lat: String(f.lat), lon: String(f.lon) });
+    if (f.zoom !== undefined) q.set('z', String(f.zoom));
     return `<li><a href="/?${esc(q.toString())}" data-favorite>${esc(f.name)}</a></li>`;
   }).join('');
   return `<details class="favs">

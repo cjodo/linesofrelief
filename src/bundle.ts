@@ -19,15 +19,18 @@ const MARGIN = 256;
 
 export const bundleUrl = (f: Favorite) => `/favorites/${f.slug}.bin`;
 
-/** The region a favourite's bundle covers, as a request for the default zoom. */
+export const favoriteZoom = (f: Favorite) => f.zoom ?? DEFAULT_ZOOM;
+
+/** The region a favourite's bundle covers, as a request at its zoom. */
 export function favoriteRequest(f: Favorite): SceneRequest {
-  const { x, y } = lonLatToWorld(f.lon, f.lat, DEFAULT_ZOOM);
+  const z = favoriteZoom(f);
+  const { x, y } = lonLatToWorld(f.lon, f.lat, z);
   return {
     id: 0,
-    z: DEFAULT_ZOOM,
-    ds: DETAIL[DEFAULT_ZOOM].ds,
-    vectorDrop: DETAIL[DEFAULT_ZOOM].vectorDrop,
-    interval: INTERVALS[DEFAULT_ZOOM],
+    z,
+    ds: DETAIL[z].ds,
+    vectorDrop: DETAIL[z].vectorDrop,
+    interval: INTERVALS[z],
     features: true,
     tx0: Math.floor((x - VIEW_W / 2 - MARGIN) / TILE),
     tx1: Math.floor((x + VIEW_W / 2 + MARGIN) / TILE),
@@ -37,13 +40,21 @@ export function favoriteRequest(f: Favorite): SceneRequest {
 }
 
 /**
- * The favourite whose bundle covers a w×h view centred on (lat, lon) at the
- * default zoom, with `spare` pixels to spare on every side; null if none does.
+ * The favourite whose bundle covers a w×h view centred on (lat, lon) at
+ * `zoom`, with `spare` pixels to spare on every side; null if none does.
  */
-export function favoriteFor(lat: number, lon: number, w: number, h: number, spare: number) {
-  const { x, y } = lonLatToWorld(lon, lat, DEFAULT_ZOOM);
+export function favoriteFor(
+  lat: number,
+  lon: number,
+  zoom: number,
+  w: number,
+  h: number,
+  spare: number,
+) {
+  const { x, y } = lonLatToWorld(lon, lat, zoom);
   return (
     FAVORITES.find((f) => {
+      if (favoriteZoom(f) !== zoom) return false;
       const r = favoriteRequest(f);
       return (
         x - w / 2 >= r.tx0 * TILE + spare &&

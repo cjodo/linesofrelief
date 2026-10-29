@@ -378,7 +378,7 @@ function arrive(
 
   // A favourite arrives pre-built: one file, no tiles, no tracing. Otherwise
   // the page's own pre-rendered map, or the coarse preview, covers the wait.
-  const favorite = zoom === DEFAULT_ZOOM ? favoriteFor(place.lat, place.lon, w, h, TRIGGER) : null;
+  const favorite = favoriteFor(place.lat, place.lon, zoom, w, h, TRIGGER);
   if (home && prerenderLive) previewCanvas.hidden = true;
   else if (favorite) {
     retirePrerender();
@@ -397,7 +397,7 @@ async function loadFavorite(f: Favorite) {
   const id = ++nextId;
   detailId = id;
   pending = {
-    zoom: DEFAULT_ZOOM,
+    zoom: r.z,
     originX: r.tx0 * TILE,
     originY: r.ty0 * TILE,
     width: (r.tx1 - r.tx0 + 1) * TILE,
