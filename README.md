@@ -116,6 +116,15 @@ transparent ground that keeps only its shadow. `make landmarks` writes
 memory stays low. `LANDMARKS_PERCENT=30` renders small previews and skips the
 share images.
 
+Each landmark's page also shows it on a site model: its neighbourhood within
+a few hundred metres, with buildings and water from the same OpenFreeMap tiles
+the map draws (raised to their `render_height`) and the ground from the
+terrain tiles, in Rosé Pine's neutrals with the water in pine. `make
+landmark-sites` fetches them through the server into `.cache/landmarks/`, and
+`make landmarks` then renders `public/landmarks/<slug>-site.webp` too. The
+site model appears on the landmark's page only, not in the index or its share
+image.
+
 ## Run it
 
 You need Node 22+, and Rust if you change the kernel or the server.
@@ -150,7 +159,8 @@ docker run -p 8080:8080 -e PORT=8080 -e REDIS_URL=redis://host:6379 topography
 | `make og` | Render share images (`public/og*.jpg`). |
 | `make prerender` | Render the pre-rendered first frames (`public/prerender/*.webp`). |
 | `make favorites` | Pre-build every place in `site/favorites.ts` into `public/favorites/*.bin`. |
-| `make landmarks` | Render the landmarks in Blender (`public/landmarks/*.webp`, `public/og/landmarks/*.jpg`). |
+| `make landmark-sites` | Fetch each landmark's neighbourhood for its site model (`.cache/landmarks/`). |
+| `make landmarks` | Render the landmarks in Blender (`public/landmarks/*.webp`, `public/og/landmarks/*.jpg`), and on their site models. |
 | `make globe` | Pre-render the world texture for the spinning globe on `/why/` (`public/globe.png`). |
 
 `og` and `prerender` drive a headless Chromium. Set `CHROMIUM=/path/to/chrome`
