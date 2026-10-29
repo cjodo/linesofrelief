@@ -5,7 +5,7 @@ SERVER     := crates/server/target/release/topography-server
 SERVER_SRC := $(wildcard crates/server/src/*.rs) crates/server/Cargo.toml
 PORT       ?= 8080
 
-.PHONY: dev build serve server wasm og prerender favorites verify clean
+.PHONY: dev build serve server wasm og prerender favorites globe verify clean
 
 # Start the server (next free port if $(PORT) is taken), wait until it has
 # written the port it bound, and leave it in $$port / its pid in $$pid.
@@ -62,6 +62,13 @@ favorites: build $(SERVER)
 	  --outfile=$(FAV_SCRIPT) --log-level=warning
 	$(call with-server,$(FAV_SCRIPT))
 	$(MAKE) build
+
+## globe: pre-render the spinning globe's texture (public/globe.png) for /why/
+GLOBE_SCRIPT := node_modules/.cache/globe.mjs
+globe: node_modules $(SERVER)
+	@npx esbuild scripts/globe.ts --bundle --platform=node --format=esm \
+	  --outfile=$(GLOBE_SCRIPT) --log-level=warning
+	$(call with-server,$(GLOBE_SCRIPT))
 
 ## verify: check summit coordinates in site/peaks.ts against the elevation tiles
 verify: node_modules

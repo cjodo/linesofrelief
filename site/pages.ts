@@ -482,6 +482,22 @@ const PAGE_CSS = `
       .prose { max-width: 60ch; margin-top: 48px; }
       .prose p { margin: 0 0 1.1em; font: italic 400 1.3rem/1.5 var(--serif); color: color-mix(in srgb, var(--text) 88%, var(--subtle)); }
       .prose a { text-decoration-color: color-mix(in srgb, var(--rose) 60%, transparent); text-underline-offset: 3px; }
+      /* /why/: the reasons on the left, the globe turning beside them (above, on phones). */
+      .why { display: grid; gap: 8px; }
+      .why-globe { margin: 24px 0 0; }
+      .why-globe canvas {
+        display: block; width: min(72vw, 320px); aspect-ratio: 1; margin: 0 auto;
+        /* A faint atmosphere: foam at the rim, fading out. */
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px color-mix(in srgb, #9ccfd8 14%, transparent),
+          0 0 60px -6px color-mix(in srgb, var(--iris) 28%, transparent);
+      }
+      @media (min-width: 1000px) {
+        .why { grid-template-columns: minmax(0, 60ch) 1fr; column-gap: 64px; align-items: start; }
+        .why-globe { grid-column: 2; grid-row: 1; position: sticky; top: 96px; margin-top: 72px; }
+        .why-globe canvas { width: min(100%, 460px); }
+        .why-text { grid-column: 1; grid-row: 1; }
+      }
       .near { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--overlay); }
       .near li a {
         display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
@@ -592,11 +608,19 @@ export function hubHtml(
   });
 }
 
-/** /why/: the reasons, one short section each (the words live in site/why.ts). */
+/** The globe's pre-rendered world texture (scripts/globe.ts, `make globe`). */
+const GLOBE_TEXTURE = '/globe.png';
+
+/**
+ * /why/: the reasons, one short section each (the words live in site/why.ts),
+ * beside the Earth's contours slowly turning. `script` is the globe's module
+ * (src/globe-page.ts, bundled).
+ */
 export function whyHtml(
   site: string,
   stylesheet: string,
   favicon: string,
+  script: string,
   version?: (path: string) => string | undefined,
 ): string {
   const sections = WHY.sections
@@ -615,11 +639,20 @@ export function whyHtml(
     favicon,
     version,
     current: 'why',
-    body: `      <h1>${esc(WHY.title)}</h1>
+    body: `      <div class="why">
+      <figure class="why-globe">
+        <canvas class="globe" data-texture="${GLOBE_TEXTURE}" role="img"
+          aria-label="The Earth's contours, coloured by height, slowly turning"></canvas>
+      </figure>
+      <div class="why-text">
+      <h1>${esc(WHY.title)}</h1>
       <p class="lede">${esc(WHY.lede)}</p>${sections}
       <section class="prose">
         <p>${WHY.closing}</p>
-      </section>`,
+      </section>
+      </div>
+      </div>
+      <script type="module" src="${script}"></script>`,
   });
 }
 

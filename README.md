@@ -136,6 +136,7 @@ docker run -p 8080:8080 -e PORT=8080 -e REDIS_URL=redis://host:6379 topography
 | `make og` | Render share images (`public/og*.jpg`). |
 | `make prerender` | Render the pre-rendered first frames (`public/prerender/*.webp`). |
 | `make favorites` | Pre-build every place in `site/favorites.ts` into `public/favorites/*.bin`. |
+| `make globe` | Pre-render the world texture for the spinning globe on `/why/` (`public/globe.png`). |
 
 `og` and `prerender` drive a headless Chromium. Set `CHROMIUM=/path/to/chrome`
 if Playwright can't find one, and `SLUGS="everest k2"` to render just those.

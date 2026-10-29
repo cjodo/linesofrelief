@@ -84,12 +84,24 @@ function render(html: string, page: Page): string {
  * map arriving there at /mountains/<slug>/map/; the /mountains/ index,
  * robots.txt and sitemap.xml.
  */
+/** The /why/ globe's module: served as source in dev, bundled in a build. */
+const GLOBE_ENTRY = 'src/globe-page.ts';
+
 function sitePages(): Plugin {
+  let building = false;
+  let globeChunk = '';
   return {
     name: 'site-pages',
     // The dev server never sends analytics.
     config(_, { command }) {
+      building = command === 'build';
       if (command === 'serve') useAnalytics('');
+    },
+    // The globe is the static pages' only script: a chunk of its own.
+    buildStart() {
+      if (building) {
+        globeChunk = this.emitFile({ type: 'chunk', id: resolve(__dirname, GLOBE_ENTRY), name: 'globe' });
+      }
     },
     // 'pre' so the dev server serves a filled-in root page too.
     transformIndexHtml: {
@@ -103,7 +115,7 @@ function sitePages(): Plugin {
         if (WHY_ROUTE.test(path)) {
           const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
           res.setHeader('Content-Type', 'text/html');
-          res.end(whyHtml(SITE_URL, '/src/style.css', faviconOf(template), publicVersion));
+          res.end(whyHtml(SITE_URL, '/src/style.css', faviconOf(template), `/${GLOBE_ENTRY}`, publicVersion));
           return;
         }
         const match = path.match(ROUTE);
@@ -159,7 +171,7 @@ function sitePages(): Plugin {
         this.emitFile({
           type: 'asset',
           fileName: 'why/index.html',
-          source: whyHtml(SITE_URL, stylesheet, favicon, publicVersion),
+          source: whyHtml(SITE_URL, stylesheet, favicon, `/${this.getFileName(globeChunk)}`, publicVersion),
         });
         this.emitFile({
           type: 'asset',
