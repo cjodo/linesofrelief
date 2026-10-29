@@ -19,7 +19,7 @@ endef
 
 ## dev: Vite dev server plus the Rust tile/search server it proxies to
 ##      (Redis optional: REDIS_URL, default redis://127.0.0.1:6379)
-dev: node_modules $(WASM) $(SERVER)
+dev: node_modules $(WASM) server
 	@$(call start-server); trap 'kill $$pid' EXIT INT TERM; \
 	API_ORIGIN=http://localhost:$$port npx vite
 
@@ -101,8 +101,10 @@ wasm: $(WASM)
 # cargo it falls back to the committed artifact.
 $(WASM): $(RUST_SRC)
 	@if command -v cargo >/dev/null 2>&1; then \
+	  cp crates/contour/Cargo-wasm.toml crates/contour/Cargo.toml && \
 	  cargo build --release --target wasm32-unknown-unknown --manifest-path crates/contour/Cargo.toml && \
-	  cp $(WASM_OUT) $@; \
+	  cp $(WASM_OUT) $@ && \
+	  git checkout crates/contour/Cargo.toml; \
 	else \
 	  echo "cargo not found; using committed $@"; touch $@; \
 	fi
