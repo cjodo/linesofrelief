@@ -130,6 +130,8 @@ const css = (c: string): RGB => c.match(/\d+/g)!.slice(0, 3).map(Number) as RGB;
 const COVER = 4;
 /** Lines are this many texels across (their soft edge adds about one more). */
 const LINE = 1.1;
+/** The graticule is a little heavier, to hold the sphere's shape. */
+const GRID_LINE = 1.8;
 
 const palette: RGB[] = [hex(INK.base)]; // 0: nothing (transparent)
 const alphas = [0];
@@ -142,7 +144,7 @@ function colour(rgb: RGB, alpha: number) {
   }
   return first;
 }
-const GRID = colour(css(ramp(0.5)), 0.4);
+const GRID = colour(css(ramp(0.5)), 0.5);
 const COAST = colour(hex(INK.shore), 1);
 const RAMP0 = palette.length;
 for (let s = 0; s < STEPS; s++) {
@@ -157,8 +159,8 @@ for (let s = 0; s < STEPS; s++) {
 // in texels (a field's distance from a level, over the field's gradient), so
 // lines have soft edges rather than stair-stepped ones.
 
-/** How much a line `d` texels away covers this texel. */
-const cover = (d: number) => Math.max(0, Math.min(1, LINE / 2 + 0.5 - d));
+/** How much a line `width` texels across, `d` texels away, covers this texel. */
+const cover = (d: number, width = LINE) => Math.max(0, Math.min(1, width / 2 + 0.5 - d));
 
 /** Gradient length of `f` at texel (x, y), per texel (wrapping east-west). */
 function gradient(f: Float32Array, x: number, y: number) {
@@ -175,12 +177,12 @@ const toGrid = (deg: number, texel: number) =>
 const out = new Uint8Array(W * H);
 for (let y = 0; y < H; y++) {
   const lat = 90 - ((y + 0.5) / H) * 180;
-  const parallel = cover(toGrid(lat, 180 / H));
+  const parallel = cover(toGrid(lat, 180 / H), GRID_LINE);
   const polar = Math.abs(lat) > MAX_LAT;
   for (let x = 0; x < W; x++) {
     const i = y * W + x;
     const lon = ((x + 0.5) / W) * 360 - 180;
-    const grid = Math.max(parallel, cover(toGrid(lon, 360 / W)));
+    const grid = Math.max(parallel, cover(toGrid(lon, 360 / W), GRID_LINE));
     let first = GRID;
     let c = grid;
     if (!polar) {
