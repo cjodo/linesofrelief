@@ -16,6 +16,10 @@ const RADIUS_M: u32 = 1000;
 const NEARBY: u32 = 20;
 const SENTENCES: u32 = 4;
 const THUMB_PX: u32 = 800;
+/// Search results looked at when nothing nearby matches,
+const SEARCHED: u32 = 5;
+/// and how far a searched article may be (its coordinates can be the site's centre).
+const SEARCH_RADIUS_M: f64 = 5000.0;
 
 /// Words that say nothing about which museum it is.
 const STOP: [&str; 20] = [
@@ -35,7 +39,7 @@ pub struct Info {
     description: Option<String>,
     extract: String,
     url: String,
-    /// Metres from the museum's map position.
+    /// Metres from the museum's map position (0 when the article has no coordinates).
     distance: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     photo: Option<Photo>,
@@ -91,44 +95,42 @@ struct Coordinate {
     dist: Option<f64>,
 }
 
-/// The write-up for the museum `name` at (lat, lon), or None when no nearby
-/// article is plainly about it.
-pub async fn lookup(http: &reqwest::Client, name: &str, lat: f64, lon: f64) -> Result<Option<Info>, BoxError> {
+/// The write-up for the museum `name` at (lat, lon), in `town` when known,
+/// or None when no article is plainly about it. Nearby articles first; if
+/// none is, a search for the name in its town, kept only when the article is
+/// close by (or, with no coordinates, mentions the town).
+pub async fn lookup(
+    http: &reqwest::Client,
+    name: &str,
+    town: Option<&str>,
+    lat: f64,
+    lon: f64,
+) -> Result<Option<Info>, BoxError> {
     let point = format!("{lat}|{lon}");
-    let mut url = reqwest::Url::parse(WIKI_API)?;
+    let wanted = tokens(name);
+
+    let mut url = pages_url(&point)?;
     url.query_pairs_mut()
-        .append_pair("action", "query")
-        .append_pair("format", "json")
-        .append_pair("formatversion", "2")
         .append_pair("generator", "geosearch")
         .append_pair("ggscoord", &point)
         .append_pair("ggsradius", &RADIUS_M.to_string())
-        .append_pair("ggslimit", &NEARBY.to_string())
-        .append_pair("prop", "extracts|pageimages|description|info|coordinates")
-        .append_pair("exintro", "1")
-        .append_pair("explaintext", "1")
-        .append_pair("exsentences", &SENTENCES.to_string())
-        .append_pair("exlimit", &NEARBY.to_string())
-        .append_pair("piprop", "thumbnail|original|name")
-        .append_pair("pithumbsize", &THUMB_PX.to_string())
-        // Free images only: lead images can be fair-use logos and posters.
-        .append_pair("pilicense", "free")
-        .append_pair("inprop", "url")
-        .append_pair("colimit", &NEARBY.to_string())
-        .append_pair("codistancefrompoint", &point);
-    let res: Response = get(http, url).await?.json().await?;
-    let pages = res.query.map(|q| q.pages).unwrap_or_default();
+        .append_pair("ggslimit", &NEARBY.to_string());
+    let mut best = pick(get_pages(http, url).await?, &wanted, |dist, _| dist.is_some());
 
-    let wanted = tokens(name);
-    let best = pages
-        .into_iter()
-        .filter_map(|p| {
-            let score = score(&wanted, &tokens(&p.title))?;
-            let dist = p.coordinates.as_ref()?.first()?.dist?;
-            Some((score, dist, p))
-        })
-        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.total_cmp(&a.1)));
-    let Some((_, dist, page)) = best else { return Ok(None) };
+    if let (None, Some(town)) = (&best, town) {
+        let mut url = pages_url(&point)?;
+        url.query_pairs_mut()
+            .append_pair("generator", "search")
+            .append_pair("gsrsearch", &format!("\"{name}\" {town}"))
+            .append_pair("gsrlimit", &SEARCHED.to_string());
+        let town_lower = town.to_lowercase();
+        best = pick(get_pages(http, url).await?, &wanted, |dist, page| match dist {
+            Some(d) => d <= SEARCH_RADIUS_M,
+            None => page.extract.as_ref().is_some_and(|e| e.to_lowercase().contains(&town_lower)),
+        });
+    }
+
+    let Some((dist, page)) = best else { return Ok(None) };
     let (Some(extract), Some(url)) = (page.extract.filter(|e| !e.trim().is_empty()), page.fullurl) else {
         return Ok(None);
     };
@@ -151,9 +153,57 @@ pub async fn lookup(http: &reqwest::Client, name: &str, lat: f64, lon: f64) -> R
         description: page.description,
         extract: extract.trim().to_owned(),
         url,
-        distance: dist.round() as u32,
+        distance: dist.map_or(0, |d| d.round() as u32),
         photo,
     }))
+}
+
+/// The API URL asking, for each page a generator finds, what a card shows.
+fn pages_url(point: &str) -> Result<reqwest::Url, BoxError> {
+    let mut url = reqwest::Url::parse(WIKI_API)?;
+    url.query_pairs_mut()
+        .append_pair("action", "query")
+        .append_pair("format", "json")
+        .append_pair("formatversion", "2")
+        .append_pair("prop", "extracts|pageimages|description|info|coordinates")
+        .append_pair("exintro", "1")
+        .append_pair("explaintext", "1")
+        .append_pair("exsentences", &SENTENCES.to_string())
+        .append_pair("exlimit", &NEARBY.to_string())
+        .append_pair("piprop", "thumbnail|original|name")
+        .append_pair("pithumbsize", &THUMB_PX.to_string())
+        // Free images only: lead images can be fair-use logos and posters.
+        .append_pair("pilicense", "free")
+        .append_pair("inprop", "url")
+        .append_pair("colimit", &NEARBY.to_string())
+        .append_pair("codistancefrompoint", point);
+    Ok(url)
+}
+
+async fn get_pages(http: &reqwest::Client, url: reqwest::Url) -> Result<Vec<Page>, BoxError> {
+    let res: Response = get(http, url).await?.json().await?;
+    Ok(res.query.map(|q| q.pages).unwrap_or_default())
+}
+
+/// The page whose title best names the museum, among those `near` accepts
+/// (given its distance in metres, when it has coordinates); ties go to the closer.
+fn pick(
+    pages: Vec<Page>,
+    wanted: &[String],
+    near: impl Fn(Option<f64>, &Page) -> bool,
+) -> Option<(Option<f64>, Page)> {
+    pages
+        .into_iter()
+        .filter_map(|p| {
+            let score = score(wanted, &tokens(&p.title))?;
+            let dist = p.coordinates.as_ref().and_then(|c| c.first()).and_then(|c| c.dist);
+            near(dist, &p).then_some((score, dist, p))
+        })
+        .max_by(|a, b| {
+            let far = |d: Option<f64>| d.unwrap_or(f64::MAX);
+            a.0.total_cmp(&b.0).then(far(b.1).total_cmp(&far(a.1)))
+        })
+        .map(|(_, dist, page)| (dist, page))
 }
 
 struct Credit {

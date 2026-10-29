@@ -298,6 +298,8 @@ async fn museums(State(app): State<Shared>, Path((z, x, file)): Path<(u32, u32, 
 #[derive(Deserialize)]
 struct MuseumQuery {
     name: String,
+    /// The settlement it belongs to on the map, when it has one.
+    town: Option<String>,
     lat: f64,
     lon: f64,
 }
@@ -305,14 +307,20 @@ struct MuseumQuery {
 /// A museum's write-up from Wikipedia (see museum_info.rs); `null` when there's none.
 async fn museum_info(State(app): State<Shared>, Query(q): Query<MuseumQuery>) -> Response {
     let name = q.name.trim();
-    if name.is_empty() || name.len() > 200 || !(-90.0..=90.0).contains(&q.lat) || !(-180.0..=180.0).contains(&q.lon) {
+    let town = q.town.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    if name.is_empty()
+        || name.len() > 200
+        || town.is_some_and(|t| t.len() > 200)
+        || !(-90.0..=90.0).contains(&q.lat)
+        || !(-180.0..=180.0).contains(&q.lon)
+    {
         return StatusCode::BAD_REQUEST.into_response();
     }
     // ~10 m cells: a museum's position comes from the same tiles every time.
     let (lat, lon) = ((q.lat * 1e4).round() / 1e4, (q.lon * 1e4).round() / 1e4);
-    let key = format!("museum-info:v1:{}@{lat},{lon}", name.to_lowercase());
+    let key = format!("museum-info:v2:{}|{}@{lat},{lon}", name.to_lowercase(), town.unwrap_or("").to_lowercase());
     cached_body(&app, &key, &MUSEUM_INFO_POLICY, || async {
-        let info = museum_info::lookup(&app.http, name, lat, lon).await?;
+        let info = museum_info::lookup(&app.http, name, town, lat, lon).await?;
         Ok(Bytes::from(serde_json::to_vec(&info)?))
     })
     .await

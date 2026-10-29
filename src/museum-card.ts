@@ -37,11 +37,13 @@ const EDGE = 16;
 
 const cache = new Map<string, Promise<MuseumInfo | null>>();
 
-function fetchInfo({ name, lat, lon }: MuseumSpot): Promise<MuseumInfo | null> {
-  const key = `${name}@${lat.toFixed(4)},${lon.toFixed(4)}`;
+function fetchInfo({ name, town, lat, lon }: MuseumSpot): Promise<MuseumInfo | null> {
+  const key = `${name}|${town ?? ''}@${lat.toFixed(4)},${lon.toFixed(4)}`;
   let hit = cache.get(key);
   if (!hit) {
+    // The town helps the server find articles that carry no coordinates.
     const q = new URLSearchParams({ name, lat: lat.toFixed(5), lon: lon.toFixed(5) });
+    if (town) q.set('town', town);
     hit = fetch(`${INFO_URL}?${q}`)
       .then((res) => {
         if (!res.ok) throw new Error(`museum-info ${res.status}`);

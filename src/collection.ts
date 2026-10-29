@@ -4,14 +4,15 @@ import type { Label } from './tiles';
 
 /**
  * A town's museums: a small inventory that grows out of the badge behind
- * its dot. Hovering, it travels with the pointer, just behind its tip; a
- * click pins it in place so a museum can be picked.
+ * its dot, by the pointer. Pinned, it holds still and takes clicks: hovering
+ * the town pins it at once (a tap does on touch), and leaving both town and
+ * list closes it.
  */
 
 /** Slots shown before "and N more". */
 const MAX_SLOTS = 8;
-/** Leaving the town closes it after this long (pointer jitter at the edge). */
-const HIDE_MS = 160;
+/** Leaving the town closes it after this long: time to cross into the list. */
+const HIDE_MS = 300;
 /** The panel's corner sits this far below-right of the pointer's tip. */
 const TRAIL = { x: 16, y: 18 };
 const EDGE = 12;
@@ -27,6 +28,7 @@ export interface Collection {
   show(key: string, town: string, museums: Label[], from: Point, at: Point): void;
   /** Hold still and take clicks. */
   pin(): void;
+  /** Close after HIDE_MS, unless the pointer comes back to the town or the list. */
   hideSoon(): void;
   hide(): void;
   readonly openKey: string | null;
@@ -52,6 +54,10 @@ export function createCollection(root: HTMLElement, onPick: (museum: Label) => v
     root.classList.remove('open', 'pinned');
   };
   root.addEventListener('pointerenter', () => clearTimeout(timer));
+  // Leaving the list (even onto the legend or nav, not the map) closes it too.
+  root.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse') api.hideSoon();
+  });
   root.addEventListener('click', (e) => {
     const slot = (e.target as Element).closest<HTMLElement>('[data-slot]');
     if (!slot) return;
@@ -73,7 +79,7 @@ export function createCollection(root: HTMLElement, onPick: (museum: Label) => v
     return { left: Math.max(EDGE, left), top: Math.max(EDGE, top) };
   }
 
-  return {
+  const api: Collection = {
     get openKey() {
       return openKey;
     },
@@ -118,12 +124,13 @@ export function createCollection(root: HTMLElement, onPick: (museum: Label) => v
       for (const b of root.querySelectorAll('button')) b.tabIndex = 0;
     },
     hideSoon() {
-      if (!openKey || pinned) return;
+      if (!openKey) return;
       clearTimeout(timer);
       timer = window.setTimeout(hide, HIDE_MS);
     },
     hide,
   };
+  return api;
 }
 
 function escape(s: string) {

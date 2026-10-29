@@ -1005,8 +1005,11 @@ canvas.addEventListener('pointermove', (e) => {
     // Hovering (no button down): famous peaks show as links.
     if (e.pointerType === 'mouse') {
       const town = townAt(e.clientX, e.clientY);
-      if (town) openTown(town, e.clientX, e.clientY);
-      else collection.hideSoon();
+      // Hovering opens the list ready to click; leaving town and list closes it.
+      if (town) {
+        openTown(town, e.clientX, e.clientY);
+        collection.pin();
+      } else collection.hideSoon();
       const linkable = town || museumAt(e.clientX, e.clientY) || famousPeakAt(e.clientX, e.clientY);
       canvas.classList.toggle('linkable', Boolean(linkable));
     }
