@@ -94,6 +94,13 @@ landmarks:
 verify: node_modules
 	node scripts/verify-peaks.ts
 
+## landmark-svgs: generate SVG icons for each landmark in site/landmarks.ts
+SVG_SCRIPT := node_modules/.cache/generate-landmark-svgs.mjs
+landmark-svgs: node_modules
+	@npx esbuild scripts/generate-landmark-svgs.ts --bundle --platform=node --format=esm \
+	  --outfile=$(SVG_SCRIPT) --log-level=warning
+	node $(SVG_SCRIPT)
+
 ## wasm: rebuild the Rust contour kernel
 wasm: $(WASM)
 
