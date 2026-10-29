@@ -319,19 +319,28 @@ export const withMuseums = (v: VectorData, museums: Label[]): VectorData =>
   museums.length ? { ...v, labels: [...v.labels, ...museums] } : v;
 
 const museums = new Map<string, Promise<Label[]>>();
+/** After a failed museum fetch, the route rests this long (it's an extra, not the map). */
+const MUSEUM_BACKOFF_MS = 60_000;
+let museumsDownUntil = 0;
 
 /** Museums in a map tile, in tile pixels; none at wide zooms. Never rejects. */
 export function loadMuseums(z: number, x: number, y: number, group?: Group): Promise<Label[]> {
   const t = z >= MUSEUM_MIN_ZOOM ? normalize(z, x, y) : null;
-  if (!t) return Promise.resolve([]);
+  if (!t || Date.now() < museumsDownUntil) return Promise.resolve([]);
   const url = museumUrl(z, t.x, t.y);
   if (group) wanted[group].add(url);
   return memoize(
     museums,
     url,
     async () => {
-      const res = await fetchCached(url, 'application/json', group);
-      return res ? decodeMuseums(await res.json(), z, t.x, t.y) : [];
+      try {
+        const res = await fetchCached(url, 'application/json', group);
+        return res ? decodeMuseums(await res.json(), z, t.x, t.y) : [];
+      } catch (e) {
+        // A superseded fetch isn't a failure; anything else rests the route.
+        if (!String(e).includes('superseded')) museumsDownUntil = Date.now() + MUSEUM_BACKOFF_MS;
+        throw e;
+      }
     },
     [],
   );
