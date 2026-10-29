@@ -205,6 +205,10 @@ body {
   width: 28px;
   height: 10px;
 }
+/* An icon drawn at map size: same column width, a taller row. */
+.key svg.tall {
+  height: 16px;
+}
 .legend h3 {
   margin: 16px 0 10px;
   font: 400 0.6rem/1 var(--mono);

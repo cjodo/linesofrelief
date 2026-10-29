@@ -55,8 +55,8 @@ export function createLegend(root: HTMLElement) {
       <div><dt><svg viewBox="0 0 28 10">
           <path d="M14 1.5L18 8.5H10Z" fill="${INK.text}"/>
         </svg></dt><dd>summit</dd></div>
-      <div><dt><svg viewBox="0 0 28 10">
-          <path transform="translate(9 0) scale(.625)" d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/>
+      <div><dt><svg class="tall" viewBox="0 0 28 16">
+          <path transform="translate(6 0)" d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/>
         </svg></dt><dd>museum</dd></div>
     </dl>
     </div>`;
