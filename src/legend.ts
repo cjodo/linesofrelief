@@ -1,5 +1,6 @@
 import { INK } from './config';
 import type { FindKind } from './contour.worker';
+import type { Point, Rect } from './hover';
 import { DOT, MUSEUM_ICON } from './features';
 import { ramp } from './render';
 
@@ -9,8 +10,16 @@ const fmt = new Intl.NumberFormat('en-US');
 const find = (kind: FindKind, noun: string) =>
   `<div class="find" role="button" tabindex="0" data-find="${kind}" title="Go to the nearest ${noun}">`;
 
-/** `onFind` runs when a row is clicked: go to the nearest of that kind. */
-export function createLegend(root: HTMLElement, onFind: (kind: FindKind) => void) {
+/**
+ * `onFind` runs when a row is clicked: go to the nearest of that kind.
+ * `onMuseumHover` follows the pointer on the museum row (its rect, or null
+ * once off it), so the nearby museums can open beside it.
+ */
+export function createLegend(
+  root: HTMLElement,
+  onFind: (kind: FindKind) => void,
+  onMuseumHover: (row: Rect | null, at: Point) => void = () => {},
+) {
   root.innerHTML = `
     <button class="legend-head" type="button" aria-expanded="false" aria-controls="legend-body">
       <h2>Elevation</h2>
@@ -105,6 +114,14 @@ export function createLegend(root: HTMLElement, onFind: (kind: FindKind) => void
 
   const museumRow = root.querySelector<HTMLElement>('[data-find="museum"]')!;
   museumRow.hidden = true;
+  museumRow.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const r = museumRow.getBoundingClientRect();
+    onMuseumHover([r.left, r.top, r.right, r.bottom], { x: e.clientX, y: e.clientY });
+  });
+  museumRow.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse') onMuseumHover(null, { x: e.clientX, y: e.clientY });
+  });
   const nearEl = museumRow.querySelector<HTMLElement>('.near')!;
 
   /**

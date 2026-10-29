@@ -1,5 +1,8 @@
-//! Just enough Mapbox Vector Tile decoding to read the point features of one
-//! layer: properties and the first point. Mirrors src/mvt.ts.
+//! Just enough Mapbox Vector Tile decoding to pick out the point features of
+//! one layer that carry a given tag (say class=museum), with a few of their
+//! properties. Mirrors src/mvt.ts, but lazily: a busy z14 poi layer holds
+//! thousands of features with dozens of names each, and only a handful are
+//! wanted, so values are decoded only for the features and keys kept.
 //! Spec: https://github.com/mapbox/vector-tile-spec/tree/master/2.1
 
 use serde_json::{Map, Value};
@@ -43,8 +46,12 @@ impl<'a> Reader<'a> {
         None
     }
 
+    fn index(&mut self) -> Option<usize> {
+        usize::try_from(self.varint()?).ok()
+    }
+
     fn bytes(&mut self) -> Option<&'a [u8]> {
-        let len = usize::try_from(self.varint()?).ok()?;
+        let len = self.index()?;
         let end = self.pos.checked_add(len)?;
         let out = self.buf.get(self.pos..end)?;
         self.pos = end;
@@ -52,7 +59,7 @@ impl<'a> Reader<'a> {
     }
 
     fn fixed<const N: usize>(&mut self) -> Option<[u8; N]> {
-        let out = self.buf.get(self.pos..self.pos + N)?.try_into().ok()?;
+        let out = self.buf.get(self.pos..self.pos.checked_add(N)?)?.try_into().ok()?;
         self.pos += N;
         Some(out)
     }
@@ -95,6 +102,19 @@ fn value(buf: &[u8]) -> Option<Value> {
     Some(value)
 }
 
+/// A string value's bytes, without decoding (or allocating) it.
+fn string_bytes(buf: &[u8]) -> Option<&[u8]> {
+    let mut r = Reader::new(buf);
+    while r.more() {
+        let tag = r.varint()?;
+        if tag >> 3 == 1 {
+            return r.bytes();
+        }
+        r.skip(tag & 7)?;
+    }
+    None
+}
+
 /// The first point of a geometry: its leading MoveTo.
 fn first_point(buf: &[u8]) -> Option<(i64, i64)> {
     let mut r = Reader::new(buf);
@@ -105,51 +125,91 @@ fn first_point(buf: &[u8]) -> Option<(i64, i64)> {
     Some((zigzag(r.varint()?), zigzag(r.varint()?)))
 }
 
-fn read_layer(buf: &[u8]) -> Option<Layer> {
+/// What to pick out of a layer: point features tagged `key` = `value`, with
+/// the properties named in `keep`.
+pub struct Want<'w> {
+    pub key: &'w str,
+    pub value: &'w str,
+    pub keep: &'w [&'w str],
+}
+
+fn read_layer(buf: &[u8], want: &Want) -> Option<Layer> {
     let mut r = Reader::new(buf);
     let mut extent = 4096;
-    let mut keys = Vec::new();
-    let mut values = Vec::new();
-    let mut raw = Vec::new();
+    // Keys and values stay raw slices of the tile until needed.
+    let mut keys: Vec<&[u8]> = Vec::new();
+    let mut values: Vec<&[u8]> = Vec::new();
+    let mut features: Vec<&[u8]> = Vec::new();
     while r.more() {
         let tag = r.varint()?;
         match tag >> 3 {
-            2 => raw.push(r.bytes()?),
-            3 => keys.push(String::from_utf8_lossy(r.bytes()?).into_owned()),
-            4 => values.push(value(r.bytes()?)?),
+            2 => features.push(r.bytes()?),
+            3 => keys.push(r.bytes()?),
+            4 => values.push(r.bytes()?),
             5 => extent = u32::try_from(r.varint()?).ok()?,
             _ => r.skip(tag & 7)?,
         }
     }
+    let none = || Some(Layer { extent, points: Vec::new() });
 
-    // Features come before keys/values in some encoders, so decode them last.
+    // The tag to match as indices into the tables: integer compares per pair.
+    // (Encoders should dedupe values, but nothing requires it.)
+    let Some(match_key) = keys.iter().position(|k| *k == want.key.as_bytes()) else { return none() };
+    let match_values: Vec<usize> = (0..values.len())
+        .filter(|&i| string_bytes(values[i]) == Some(want.value.as_bytes()))
+        .collect();
+    if match_values.is_empty() {
+        return none();
+    }
+    // Each kept property's index in the layer's key table, where present.
+    let keep: Vec<(usize, &str)> = want
+        .keep
+        .iter()
+        .filter_map(|name| Some((keys.iter().position(|k| *k == name.as_bytes())?, *name)))
+        .collect();
+
+    // Features come before keys/values in some encoders, so they're read last.
     let mut points = Vec::new();
-    for feature in raw {
+    for feature in features {
         let mut f = Reader::new(feature);
-        let mut kind = 0;
-        let mut properties = Map::new();
-        let mut point = None;
+        let (mut kind, mut tags, mut geometry) = (0, None, None);
         while f.more() {
             let tag = f.varint()?;
             match tag >> 3 {
-                2 => {
-                    let mut t = Reader::new(f.bytes()?);
-                    while t.more() {
-                        let k = keys.get(usize::try_from(t.varint()?).ok()?)?;
-                        let v = values.get(usize::try_from(t.varint()?).ok()?)?;
-                        properties.insert(k.clone(), v.clone());
-                    }
-                }
+                2 => tags = Some(f.bytes()?),
                 3 => kind = f.varint()?,
-                4 => point = first_point(f.bytes()?),
+                4 => geometry = Some(f.bytes()?),
                 _ => f.skip(tag & 7)?,
             }
         }
-        if let (1, Some((x, y))) = (kind, point) {
-            points.push(Point { properties, x, y });
+        let (1, Some(tags), Some(geometry)) = (kind, tags, geometry) else { continue };
+        if !has_tag(tags, match_key, &match_values)? {
+            continue;
         }
+        let Some((x, y)) = first_point(geometry) else { continue };
+        let mut properties = Map::new();
+        let mut t = Reader::new(tags);
+        while t.more() {
+            let (k, v) = (t.index()?, t.index()?);
+            if let Some((_, name)) = keep.iter().find(|(i, _)| *i == k) {
+                properties.insert((*name).to_owned(), value(values.get(v)?)?);
+            }
+        }
+        points.push(Point { properties, x, y });
     }
     Some(Layer { extent, points })
+}
+
+/// Whether a feature's packed (key, value) index pairs include `key` with one of `values`.
+fn has_tag(tags: &[u8], key: usize, values: &[usize]) -> Option<bool> {
+    let mut t = Reader::new(tags);
+    while t.more() {
+        let (k, v) = (t.index()?, t.index()?);
+        if k == key && values.contains(&v) {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 fn layer_name(buf: &[u8]) -> Option<&[u8]> {
@@ -164,16 +224,17 @@ fn layer_name(buf: &[u8]) -> Option<&[u8]> {
     None
 }
 
-/// The point features of the layer called `name`, if the tile has one.
-pub fn points(tile: &[u8], name: &str) -> Option<Layer> {
+/// The point features of the layer called `name` that `want` picks out, if
+/// the tile has that layer.
+pub fn points(tile: &[u8], name: &str, want: &Want) -> Option<Layer> {
     let mut r = Reader::new(tile);
     while r.more() {
         let tag = r.varint()?;
         if tag >> 3 == 3 {
             let buf = r.bytes()?;
-            // Only the wanted layer is decoded in full.
+            // Only the wanted layer is read past its name.
             if layer_name(buf)? == name.as_bytes() {
-                return read_layer(buf);
+                return read_layer(buf, want);
             }
         } else {
             r.skip(tag & 7)?;
