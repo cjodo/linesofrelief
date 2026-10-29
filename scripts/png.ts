@@ -1,8 +1,9 @@
 /**
- * Minimal PNG decoder for elevation tiles: 8-bit RGB or RGBA, not interlaced
- * (what Terrarium tiles are). Returns raw pixels and the channel count.
+ * Minimal PNG decoding for elevation tiles (8-bit RGB or RGBA, not interlaced:
+ * what Terrarium tiles are) and encoding for palette images (the globe's
+ * texture).
  */
-import { inflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 
 export function decodePng(buf: Uint8Array): { width: number; height: number; channels: number; pixels: Uint8Array } {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -60,4 +61,66 @@ export function decodePng(buf: Uint8Array): { width: number; height: number; cha
     }
   }
   return { width, height, channels, pixels };
+}
+
+const CRC = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function chunk(type: string, data: Uint8Array): Uint8Array {
+  const out = new Uint8Array(12 + data.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, data.length);
+  out.set(new TextEncoder().encode(type), 4);
+  out.set(data, 8);
+  let c = 0xffffffff;
+  for (let i = 4; i < 8 + data.length; i++) c = CRC[(c ^ out[i]) & 0xff] ^ (c >>> 8);
+  view.setUint32(8 + data.length, (c ^ 0xffffffff) >>> 0);
+  return out;
+}
+
+/**
+ * Minimal PNG encoder for palette images: one byte per pixel indexing up to
+ * 256 RGB colours, each with an optional alpha (0-255). Few colours over a
+ * lot of flat ground compress well.
+ */
+export function encodeIndexedPng(
+  width: number,
+  height: number,
+  palette: [number, number, number][],
+  indices: Uint8Array,
+  alphas?: number[],
+): Uint8Array {
+  if (palette.length > 256) throw new Error('palette over 256 colours');
+  const ihdr = new Uint8Array(13);
+  const v = new DataView(ihdr.buffer);
+  v.setUint32(0, width);
+  v.setUint32(4, height);
+  ihdr.set([8, 3, 0, 0, 0], 8); // 8-bit, indexed colour, no interlace
+  const raw = new Uint8Array((width + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (width + 1)] = 0; // filter: none (palette images rarely gain from filters)
+    raw.set(indices.subarray(y * width, (y + 1) * width), y * (width + 1) + 1);
+  }
+  const parts = [
+    new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('PLTE', Uint8Array.from(palette.flat())),
+    ...(alphas ? [chunk('tRNS', Uint8Array.from(alphas))] : []),
+    chunk('IDAT', deflateSync(raw, { level: 9 })),
+    chunk('IEND', new Uint8Array()),
+  ];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
 }

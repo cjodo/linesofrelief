@@ -1,10 +1,11 @@
 /**
  * Build-time rendering for the static pages: the map at /, a landing page per
- * summit at /mountains/<slug>/ (the same app, arriving at that summit), and
- * the /mountains/ index. Imported by vite.config.ts only.
+ * summit at /mountains/<slug>/ (the same app, arriving at that summit), the
+ * /mountains/ index and /why/. Imported by vite.config.ts only.
  */
 import { FAVORITES } from './favorites.ts';
 import { detailOf, PEAKS, type Peak } from './peaks.ts';
+import { WHY } from './why.ts';
 
 export interface Page {
   path: string;
@@ -183,6 +184,25 @@ export function hubPage(site: string): Page {
           url: `${site}${peakPath(p)}`,
           name: p.name,
         })),
+      },
+    ],
+  };
+}
+
+export function whyPage(site: string): Page {
+  return {
+    path: '/why/',
+    title: `Why · ${SITE_NAME}`,
+    description: WHY.lede,
+    image: '/og.jpg',
+    imageAlt: 'Contour lines drawn in teal, iris, rose and gold on a dark background',
+    jsonLd: [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'AboutPage',
+        name: `Why ${SITE_NAME}`,
+        url: `${site}/why/`,
+        description: WHY.lede,
       },
     ],
   };
@@ -419,7 +439,7 @@ const PAGE_CSS = `
       }
       .list .name { font: italic 400 clamp(1.5rem, 4vw, 2.1rem) / 1.05 var(--serif); transition: color 0.2s; }
       .list li a:hover .name, .list li a:focus-visible .name { color: var(--rose); }
-      .list li a[aria-current] .name { color: var(--gold, #f6c177); }
+      .list li a[aria-current] .name { color: var(--gold); }
       .list .ele { font: 400 0.8rem/1 var(--mono); letter-spacing: 0.08em; color: var(--subtle); font-variant-numeric: tabular-nums; }
       .list .bar {
         grid-column: 1 / -1; height: 2px; width: var(--w); border-radius: 1px;
@@ -461,6 +481,27 @@ const PAGE_CSS = `
       .prose { max-width: 60ch; margin-top: 48px; }
       .prose p { margin: 0 0 1.1em; font: italic 400 1.3rem/1.5 var(--serif); color: color-mix(in srgb, var(--text) 88%, var(--subtle)); }
       .prose a { text-decoration-color: color-mix(in srgb, var(--rose) 60%, transparent); text-underline-offset: 3px; }
+      /* /why/: the words on the left, the globe turning beside them (above, on phones). */
+      .why { display: grid; gap: 8px; }
+      .why-globe { margin: 24px 0 0; }
+      .why-globe canvas { display: block; width: min(72vw, 320px); aspect-ratio: 1; margin: 0 auto; }
+      /* Where the data comes from, and where to give back. */
+      .sources { max-width: 60ch; margin-top: 64px; }
+      .sources-intro { margin: 0 0 24px; font: italic 400 1.15rem/1.5 var(--serif); color: var(--subtle); }
+      .sources ul { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--overlay); }
+      .sources li { padding: 18px 0 20px; border-bottom: 1px solid var(--overlay); }
+      .sources .name { font: italic 400 1.45rem/1.15 var(--serif); color: var(--text); text-decoration: none; }
+      .sources .name:hover { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--rose) 60%, transparent); text-underline-offset: 3px; }
+      .sources .use { margin: 6px 0 10px; font: 400 0.98rem/1.45 var(--serif); color: var(--subtle); }
+      .sources .give { font: 400 0.62rem/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); text-decoration: none; }
+      .sources a.give:hover { text-decoration: underline; text-underline-offset: 3px; }
+      .sources .give.none { margin: 0; color: var(--muted); }
+      @media (min-width: 1000px) {
+        .why { grid-template-columns: minmax(0, 60ch) 1fr; column-gap: 64px; align-items: start; }
+        .why-globe { grid-column: 2; grid-row: 1; position: sticky; top: 96px; margin-top: 72px; }
+        .why-globe canvas { width: min(100%, 460px); }
+        .why-text { grid-column: 1; grid-row: 1; }
+      }
       .near { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--overlay); }
       .near li a {
         display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
@@ -483,13 +524,13 @@ interface Shell {
   stylesheet: string;
   favicon: string;
   version?: (path: string) => string | undefined;
-  /** The nav's current item: the index, or a summit (with a link to its map). */
-  current: 'summits' | Peak;
+  /** The nav's current item: the index, /why/, or a summit (with a link to its map). */
+  current: 'summits' | 'why' | Peak;
   body: string;
 }
 
 function shell({ page, site, stylesheet, favicon, version, current, body }: Shell): string {
-  const summit = current === 'summits' ? null : current;
+  const summit = typeof current === 'string' ? null : current;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -513,7 +554,8 @@ ${analyticsHtml()}
     <main class="page">
       <nav class="nav" aria-label="Site">
         <a class="brand" href="/">Topography</a>
-        <a href="/mountains/"${summit ? '' : ' aria-current="page"'}>Summits</a>
+        <a href="/mountains/"${current === 'summits' ? ' aria-current="page"' : ''}>Summits</a>
+        <a href="/why/"${current === 'why' ? ' aria-current="page"' : ''}>Why</a>
         ${favoritesNav()}
         ${summit ? `<a href="${mapPath(summit)}">Live map</a>` : ''}
       </nav>
@@ -521,6 +563,7 @@ ${body}
       <footer>
         <a href="/">Search the whole world →</a>
         <a href="/mountains/">All summits</a>
+        <a href="/why/">Why this map</a>
         ${summit ? `<a href="${mapPath(summit)}">${esc(summit.name)} on the live map</a>` : ''}
         <a href="#" class="consent-link" data-consent>Cookies</a>
         <span class="credits">${CREDITS}</span>
@@ -566,6 +609,61 @@ export function hubHtml(
       <p class="lede">${esc(page.description)}</p>
       <ol class="list" style="margin-top: 56px">${rows}
       </ol>`,
+  });
+}
+
+/** The globe's pre-rendered world texture (scripts/globe.ts, `make globe`). */
+const GLOBE_TEXTURE = '/globe.png';
+
+/**
+ * /why/: a line on why (the words live in site/why.ts) beside the Earth's
+ * contours slowly turning. `script` is the globe's module (src/globe-page.ts,
+ * bundled).
+ */
+export function whyHtml(
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  script: string,
+  version?: (path: string) => string | undefined,
+): string {
+  return shell({
+    page: whyPage(site),
+    site,
+    stylesheet,
+    favicon,
+    version,
+    current: 'why',
+    body: `      <div class="why">
+      <figure class="why-globe">
+        <canvas class="globe" data-texture="${GLOBE_TEXTURE}" role="img"
+          aria-label="The Earth's contours, coloured by height, slowly turning"></canvas>
+      </figure>
+      <div class="why-text">
+      <h1>${esc(WHY.title)}</h1>
+      <p class="lede">${esc(WHY.lede)}</p>
+      <section class="sources">
+        <h2>${esc(WHY.sources.heading)}</h2>
+        <p class="sources-intro">${esc(WHY.sources.intro)}</p>
+        <ul>${WHY.sources.list
+          .map(
+            (src) => `
+          <li>
+            <a class="name" href="${esc(src.url)}">${esc(src.name)}</a>
+            <p class="use">${esc(src.use)}</p>
+            ${
+              src.donate
+                ? `<a class="give" href="${esc(src.donate.url)}">${esc(src.donate.label)} ↗</a>`
+                : `<p class="give none">${esc(src.note ?? '')}</p>`
+            }
+          </li>`,
+          )
+          .join('')}
+        </ul>
+      </section>
+      </div>
+      </div>
+      <script type="module" src="${script}"></script>`,
   });
 }
 
@@ -683,6 +781,7 @@ export function sitemap(site: string, hasImage: (p: Peak) => boolean): string {
   const urls: { loc: string; image?: string }[] = [
     { loc: `${site}/`, image: `${site}/og.jpg` },
     { loc: `${site}/mountains/` },
+    { loc: `${site}/why/` },
     ...PEAKS.map((p) => ({
       loc: `${site}${peakPath(p)}`,
       image: hasImage(p) ? `${site}/og/${p.slug}.jpg` : undefined,

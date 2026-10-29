@@ -18,6 +18,7 @@ import {
   sitemap,
   summaryHtml,
   useAnalytics,
+  whyHtml,
   type Page,
 } from './site/pages';
 import { PEAKS, type Peak } from './site/peaks';
@@ -42,6 +43,7 @@ if (TAG_ID !== 'OFF' && !TAG_OK) {
 useAnalytics(TAG_OK ? TAG_ID : '');
 
 const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?(map\/?)?)?$/;
+const WHY_ROUTE = /^\/why\/?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
 
 const hasPrerender = (key: string) =>
@@ -82,22 +84,41 @@ function render(html: string, page: Page): string {
  * map arriving there at /mountains/<slug>/map/; the /mountains/ index,
  * robots.txt and sitemap.xml.
  */
+/** The /why/ globe's module: served as source in dev, bundled in a build. */
+const GLOBE_ENTRY = 'src/globe-page.ts';
+
 function sitePages(): Plugin {
+  let building = false;
+  let globeChunk = '';
   return {
     name: 'site-pages',
     // The dev server never sends analytics.
     config(_, { command }) {
+      building = command === 'build';
       if (command === 'serve') useAnalytics('');
+    },
+    // The globe is the static pages' only script: a chunk of its own.
+    buildStart() {
+      if (building) {
+        globeChunk = this.emitFile({ type: 'chunk', id: resolve(__dirname, GLOBE_ENTRY), name: 'globe' });
+      }
     },
     // 'pre' so the dev server serves a filled-in root page too.
     transformIndexHtml: {
       order: 'pre',
       handler: (html) => render(html, root()),
     },
-    // Dev has no generated files, so render /mountains/ and its summits on request.
+    // Dev has no generated files, so render /mountains/, its summits and /why/ on request.
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        const match = (req.url ?? '').split('?')[0].match(ROUTE);
+        const path = (req.url ?? '').split('?')[0];
+        if (WHY_ROUTE.test(path)) {
+          const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
+          res.setHeader('Content-Type', 'text/html');
+          res.end(whyHtml(SITE_URL, '/src/style.css', faviconOf(template), `/${GLOBE_ENTRY}`, publicVersion));
+          return;
+        }
+        const match = path.match(ROUTE);
         if (!match) return next();
         try {
           const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
@@ -146,6 +167,11 @@ function sitePages(): Plugin {
           type: 'asset',
           fileName: 'mountains/index.html',
           source: hubHtml(SITE_URL, stylesheet, favicon, publicVersion),
+        });
+        this.emitFile({
+          type: 'asset',
+          fileName: 'why/index.html',
+          source: whyHtml(SITE_URL, stylesheet, favicon, `/${this.getFileName(globeChunk)}`, publicVersion),
         });
         this.emitFile({
           type: 'asset',
