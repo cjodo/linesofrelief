@@ -265,7 +265,9 @@ export function htmlAttrs(page: Page): string {
 
 /** Styles shared by the index and the summaries, on top of the site stylesheet. */
 const PAGE_CSS = `
-      html, body { height: auto; overflow: auto; }
+      /* Scroll like a document. The map's overflow: hidden and overscroll-behavior:
+         none (no rubber-banding) would otherwise trap the wheel on these pages. */
+      html, body { height: auto; overflow: visible; overscroll-behavior: auto; }
       body { padding: max(24px, 6vw) max(16px, 6vw) 96px; }
       .page { max-width: 920px; margin: 0 auto; }
       .page .nav { position: static; height: auto; flex-wrap: wrap; row-gap: 12px; }
