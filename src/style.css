@@ -1224,7 +1224,80 @@ body:not(.loaded) .locator {
   }
 }
 
-@media (max-width: 520px) {
+/* The legend never climbs into the top bar: past that it scrolls. */
+.legend {
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* --- Layering: one scale for everything over the map ------------------------
+ * map < vignette < legend/locator (auto) < top bar (5) < discovery card (6)
+ * < an open menu (12) < loading bar (20) < consent (40)
+ */
+.nav:has(.favs[open]),
+.search:focus-within {
+  z-index: 12;
+}
+.search ul {
+  max-height: calc(100dvh - 140px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* --- Narrow screens (phones, tablets portrait): nav on its own row ---------- */
+@media (max-width: 900px) {
+  .nav {
+    top: 8px;
+    left: 16px;
+    right: 16px;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .nav a,
+  .favs summary {
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+  }
+  .textsize button {
+    min-width: 20px;
+    padding: 0 2px;
+  }
+  .search {
+    top: 52px;
+    left: 16px;
+    right: 112px;
+    width: auto;
+  }
+  .share {
+    top: 52px;
+  }
+  .share.export {
+    right: 64px;
+  }
+  .intro {
+    top: 120px;
+  }
+  .favs-panel {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 380px) {
+  .nav a,
+  .favs summary {
+    font-size: 0.56rem;
+    letter-spacing: 0.08em;
+  }
+  .textsize {
+    margin-left: 0;
+  }
+}
+
+/* --- Small or short screens: legend folds into a chip, locator compacts ---- */
+@media (max-width: 520px), (max-height: 600px) {
   /* Folded: a small chip. Open: a bottom sheet, scale left, keys right. */
   .legend {
     left: 16px;
@@ -1306,37 +1379,6 @@ body:not(.loaded) .locator {
   .key dd {
     font-size: 0.88rem;
   }
-  .nav {
-    top: 8px;
-    left: 16px;
-    right: 16px;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .nav a,
-  .favs summary {
-    font-size: 0.62rem;
-    letter-spacing: 0.14em;
-  }
-  .textsize button {
-    min-width: 20px;
-    padding: 0 2px;
-  }
-  .search {
-    top: 52px;
-    left: 16px;
-    right: 112px;
-    width: auto;
-  }
-  .share {
-    top: 52px;
-  }
-  .share.export {
-    right: 64px;
-  }
-  .intro {
-    top: 120px;
-  }
   .locator {
     right: 16px;
     bottom: 16px;
@@ -1366,6 +1408,23 @@ body:not(.loaded) .locator {
   /* The open legend sheet spans the width; the locator steps aside. */
   body:has(.legend.open) .locator {
     opacity: 0;
+  }
+}
+
+@media (max-height: 600px) {
+  .minimap {
+    display: none;
+  }
+  .legend.open {
+    right: auto;
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
+  }
+  .intro {
+    top: 104px;
+  }
+  .intro .place {
+    font-size: clamp(2rem, 7vh, 3rem);
   }
 }
 

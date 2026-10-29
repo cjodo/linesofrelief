@@ -60,8 +60,11 @@ export function createMinimap(root: HTMLElement) {
   }
 
   /** Centre of the view in world pixels at the view's `zoom`. */
+  let last: [number, number, number] | null = null;
   function update(x: number, y: number, zoom: number) {
+    last = [x, y, zoom];
     const { width, height } = size();
+    if (!width) return; // hidden (short screens): nothing to place
     const k = width / (TILE * 2 ** zoom);
     const px = Math.min(width, Math.max(0, x * k));
     const py = Math.min(height, Math.max(0, y * k - (TOP * width) / TILE));
@@ -70,10 +73,18 @@ export function createMinimap(root: HTMLElement) {
   }
 
   paint().catch(() => root.classList.add('failed'));
+  // The minimap's own size changes with breakpoints and rotation, not just the
+  // window: repaint and re-place the marker whenever it does.
   let resize = 0;
-  window.addEventListener('resize', () => {
+  let painted = 0;
+  new ResizeObserver(() => {
+    const width = root.clientWidth;
+    if (!width || width === painted) return;
     clearTimeout(resize);
-    resize = window.setTimeout(() => void paint(), 200);
-  });
+    resize = window.setTimeout(() => {
+      painted = width;
+      void paint().then(() => last && update(...last));
+    }, 120);
+  }).observe(root);
   return update;
 }
