@@ -1207,7 +1207,11 @@ let wheelLockedUntil = 0;
 window.addEventListener(
   'wheel',
   (e) => {
+    // A museum's card or list scrolls itself, the browser's own way.
+    if ((e.target as Element | null)?.closest?.('.museum-card, .collection')) return;
     e.preventDefault(); // the page itself never scrolls or zooms
+    // While a museum's card is open, the wheel leaves the map alone.
+    if (museumCard.open) return;
     const now = performance.now();
     if (now < wheelLockedUntil) {
       wheelLockedUntil = now + WHEEL_QUIET_MS; // still the same gesture
