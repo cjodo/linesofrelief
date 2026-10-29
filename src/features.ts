@@ -71,14 +71,17 @@ const STYLE: Record<LabelKind, LabelStyle> = {
 const ELE_FONT = `400 9px ${MONO}`;
 
 /**
- * Museum: a temple front (pediment, three columns, plinth) on a 12×12 grid,
- * centred on 6,6. Shared with the legend's <svg>.
+ * Museum: a classical front (pediment with an open tympanum, entablature,
+ * four columns, two steps) on a 16×16 grid, centred on 8,8. Filled even-odd
+ * for the tympanum. Shared with the legend's <svg>.
  */
 export const MUSEUM_ICON =
-  'M6 .5 11.5 3.5H.5ZM1.5 4.5h2v5h-2ZM5 4.5h2v5H5ZM8.5 4.5h2v5h-2ZM.5 10h11v1.5H.5Z';
+  'M8 .5 15.5 4.5H.5ZM8 2.1 10.8 3.6H5.2ZM1 5h14v1.5H1Z' +
+  'M2 7.5h1.6v5H2ZM5.5 7.5h1.6v5H5.5ZM8.9 7.5h1.6v5H8.9ZM12.4 7.5h1.6v5H12.4Z' +
+  'M1.5 13.5h13v1H1.5ZM.5 14.5h15v1H.5Z';
 let museumPath: Path2D | null = null;
 /** Half the icon's size, for its placement box. */
-const MUSEUM_HALF = 7;
+const MUSEUM_HALF = 9;
 
 /** Settlement dot radius; names sit just above the dot. */
 export const DOT: Partial<Record<LabelKind, number>> = { city: 3, town: 2.2, village: 1.6 };
@@ -296,10 +299,10 @@ export function drawLabels(ctx: CanvasRenderingContext2D, f: Features, v: View) 
     if (label.kind === 'museum') {
       museumPath ??= new Path2D(MUSEUM_ICON);
       ctx.globalAlpha = 1;
-      ctx.translate(-6, -6);
+      ctx.translate(-8, -8);
       ctx.lineWidth = 2.5;
       ctx.stroke(museumPath);
-      ctx.fill(museumPath);
+      ctx.fill(museumPath, 'evenodd');
     } else if (dot) {
       ctx.beginPath();
       ctx.arc(0, 0, dot, 0, Math.PI * 2);
