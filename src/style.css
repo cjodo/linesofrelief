@@ -1222,30 +1222,6 @@ body:has(.search.searching) .loading-bar {
   color: var(--text);
 }
 
-/* A lone museum icon's name, above it while hovered. */
-.map-tip {
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 4;
-  max-width: 16rem;
-  padding: 4px 8px 5px;
-  transform: translate(-50%, -100%);
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  border: 1px solid color-mix(in srgb, var(--love) 30%, var(--overlay));
-  border-radius: 2px;
-  font: italic 400 0.9rem/1.2 var(--serif);
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.map-tip.on {
-  opacity: 1;
-}
 .collection .more {
   margin: 6px 0 0 44px;
   font: 400 0.56rem/1 var(--mono);
@@ -1466,6 +1442,54 @@ body:has(.search.searching) .loading-bar {
   color: var(--muted);
 }
 
+/* The hover window: the card, compact, beside what's hovered. It never
+   takes the pointer; a click opens the card itself. */
+.museum-card.peek {
+  z-index: 5;
+  width: 16rem;
+  max-height: none;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.25s cubic-bezier(0.2, 0.9, 0.25, 1),
+    visibility 0s linear 0.25s;
+}
+.museum-card.peek.open {
+  transform: none;
+  transition-delay: 0s;
+}
+.museum-card.peek .photo {
+  aspect-ratio: 16 / 9;
+}
+.museum-card.peek .body {
+  padding: 12px 14px 12px;
+}
+.museum-card.peek .photo + .body {
+  margin-top: -18px;
+}
+.museum-card.peek h2 {
+  margin-top: 8px;
+  font-size: 1.3rem;
+}
+.museum-card.peek .extract {
+  margin-top: 10px;
+  padding-top: 8px;
+  font-size: 0.9rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.museum-card.peek .hint {
+  margin-top: 10px;
+  font: 400 0.52rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
 /* Phones: a sheet along the bottom, over the minimap. */
 @media (max-width: 600px) {
   .museum-card {
@@ -1479,6 +1503,14 @@ body:has(.search.searching) .loading-bar {
   }
   .museum-card .photo {
     aspect-ratio: 16 / 8;
+  }
+  .museum-card.peek {
+    left: 0;
+    right: auto;
+    top: 0;
+    bottom: auto;
+    width: 16rem;
+    max-height: none;
   }
 }
 

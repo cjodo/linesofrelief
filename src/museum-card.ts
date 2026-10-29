@@ -1,5 +1,6 @@
 import { INK } from './config';
 import { MUSEUM_ICON } from './features';
+import { dock } from './hover';
 
 /**
  * A museum's card: its photo, name and a few sentences from Wikipedia,
@@ -65,6 +66,51 @@ const escape = (s: string) =>
 
 const icon = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="${MUSEUM_ICON}" fill="${INK.border}" fill-rule="evenodd"/></svg>`;
 
+/**
+ * A museum's write-up into `root`: shimmering while `info` is undefined (on
+ * its way), a quiet note when null (no article). Compact is the hover
+ * window: no close button, the text cut short, a hint that a click opens it.
+ */
+export function renderMuseum(
+  root: HTMLElement,
+  spot: MuseumSpot,
+  info: MuseumInfo | null | undefined,
+  { compact = false } = {},
+) {
+  const eyebrow = `<p class="eyebrow">${icon}<span>Museum${spot.town ? ` · ${escape(spot.town)}` : ''}</span></p>`;
+  const close = compact ? '' : `<button class="close" type="button" aria-label="Close">×</button>`;
+  const footer = (link: string) => (compact ? `<p class="hint">Click to open</p>` : `<footer>${link}</footer>`);
+  if (info === undefined) {
+    root.innerHTML = `${close}<div class="photo loading"></div><div class="body">${eyebrow}
+      <h2>${escape(spot.name)}</h2><p class="shimmer"></p><p class="shimmer"></p><p class="shimmer short"></p></div>`;
+    return;
+  }
+  if (!info) {
+    root.innerHTML = `${close}<div class="body">${eyebrow}<h2>${escape(spot.name)}</h2>
+      <p class="extract quiet">Nothing written about it on Wikipedia yet.</p>
+      ${footer(`<a href="https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(spot.name)}" target="_blank" rel="noopener">Search Wikipedia ↗</a>`)}</div>`;
+    return;
+  }
+  const p = info.photo;
+  const credit = p
+    ? `<figcaption><a href="${escape(p.page)}" target="_blank" rel="noopener">${p.artist ? `${escape(p.artist)} · ` : ''}${escape(p.license)}</a></figcaption>`
+    : '';
+  root.innerHTML = `${close}
+    ${p ? `<figure class="photo"><img src="${escape(p.thumb.source)}" alt="${escape(info.title)}" width="${p.thumb.width}" height="${p.thumb.height}" decoding="async">${credit}</figure>` : ''}
+    <div class="body">${eyebrow}
+      <h2>${escape(info.title)}</h2>
+      ${info.description ? `<p class="description">${escape(info.description)}</p>` : ''}
+      <p class="extract">${escape(info.extract)}</p>
+      ${footer(`<a href="${escape(info.url)}" target="_blank" rel="noopener">Read on Wikipedia ↗</a><span>Text CC BY-SA</span>`)}
+    </div>`;
+  const img = root.querySelector('img');
+  if (img) {
+    const done = () => img.classList.add('loaded');
+    if (img.complete) done();
+    else img.addEventListener('load', done, { once: true });
+  }
+}
+
 export function createMuseumCard(root: HTMLElement) {
   let openFor: MuseumSpot | null = null;
   let at = { x: 0, y: 0 };
@@ -87,47 +133,12 @@ export function createMuseumCard(root: HTMLElement) {
       root.style.translate = '';
       return;
     }
-    const [w, h] = [root.offsetWidth, root.offsetHeight];
-    const right = at.x + GAP + w <= innerWidth - EDGE;
-    const left = right ? at.x + GAP : Math.max(EDGE, at.x - GAP - w);
-    const top = Math.max(EDGE + 56, Math.min(at.y - h / 2, innerHeight - h - EDGE));
-    root.style.translate = `${left}px ${top}px`;
+    // Clear of the top bar.
+    const { left, top } = dock(root, [at.x, at.y, at.x, at.y], 'beside', { gap: GAP, edge: EDGE, minTop: EDGE + 56 });
     root.style.transformOrigin = `${at.x - left}px ${at.y - top}px`;
   }
 
-  function render(spot: MuseumSpot, info: MuseumInfo | null | undefined) {
-    const eyebrow = `<p class="eyebrow">${icon}<span>Museum${spot.town ? ` · ${escape(spot.town)}` : ''}</span></p>`;
-    const close = `<button class="close" type="button" aria-label="Close">×</button>`;
-    if (info === undefined) {
-      root.innerHTML = `${close}<div class="photo loading"></div><div class="body">${eyebrow}
-        <h2>${escape(spot.name)}</h2><p class="shimmer"></p><p class="shimmer"></p><p class="shimmer short"></p></div>`;
-      return;
-    }
-    if (!info) {
-      root.innerHTML = `${close}<div class="body">${eyebrow}<h2>${escape(spot.name)}</h2>
-        <p class="extract quiet">Nothing written about it on Wikipedia yet.</p>
-        <footer><a href="https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(spot.name)}" target="_blank" rel="noopener">Search Wikipedia ↗</a></footer></div>`;
-      return;
-    }
-    const p = info.photo;
-    const credit = p
-      ? `<figcaption><a href="${escape(p.page)}" target="_blank" rel="noopener">${p.artist ? `${escape(p.artist)} · ` : ''}${escape(p.license)}</a></figcaption>`
-      : '';
-    root.innerHTML = `${close}
-      ${p ? `<figure class="photo"><img src="${escape(p.thumb.source)}" alt="${escape(info.title)}" width="${p.thumb.width}" height="${p.thumb.height}" decoding="async">${credit}</figure>` : ''}
-      <div class="body">${eyebrow}
-        <h2>${escape(info.title)}</h2>
-        ${info.description ? `<p class="description">${escape(info.description)}</p>` : ''}
-        <p class="extract">${escape(info.extract)}</p>
-        <footer><a href="${escape(info.url)}" target="_blank" rel="noopener">Read on Wikipedia ↗</a><span>Text CC BY-SA</span></footer>
-      </div>`;
-    const img = root.querySelector('img');
-    if (img) {
-      const done = () => img.classList.add('loaded');
-      if (img.complete) done();
-      else img.addEventListener('load', done, { once: true });
-    }
-  }
+  const render = (spot: MuseumSpot, info: MuseumInfo | null | undefined) => renderMuseum(root, spot, info);
 
   return {
     /** Open for `spot`, beside screen point (x, y) where the museum is drawn. */
