@@ -31,7 +31,6 @@ export const FAVORITES: Favorite[] = [
   { slug: 'mount-bachelor', name: 'Mount Bachelor', lat: 43.9794, lon: -121.6885 },
   { slug: 'black-tusk', name: 'The Black Tusk', lat: 49.9754, lon: -123.0427 },
   { slug: 'mount-st-helens', name: 'Mount St. Helens', lat: 46.1914, lon: -122.1955 },
-  { slug: 'muriel-lake', name: 'Muriel Lake', lat: 54.1523, lon: -110.6847 },
   // Whole countries open at the widest scale.
   { slug: 'nepal', name: 'Nepal', lat: 28.378, lon: 84.0, zoom: 8 },
   { slug: 'ethiopia', name: 'Ethiopia', lat: 10.2117, lon: 38.6521, zoom: 8 },
