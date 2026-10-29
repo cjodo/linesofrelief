@@ -1,7 +1,20 @@
-import { DEFAULT_ZOOM, DETAIL, INTERVALS, MONO, SERIF, START, TILE, ZOOMS } from './config';
+import {
+  DEFAULT_ZOOM,
+  DETAIL,
+  INTERVALS,
+  MONO,
+  MUSEUM_MIN_ZOOM,
+  SERIF,
+  START,
+  TILE,
+  ZOOMS,
+} from './config';
 import type {
+  FindKind,
   NameRequest,
   NameResult,
+  NearestRequest,
+  NearestResult,
   SceneProgress,
   SceneRequest,
   SceneResult,
@@ -45,7 +58,9 @@ const ctx = canvas.getContext('2d')!;
 const previewCanvas = document.querySelector<HTMLCanvasElement>('#preview')!;
 const pctx = previewCanvas.getContext('2d')!;
 const readout = document.querySelector<HTMLElement>('#coords')!;
-const updateLegend = createLegend(document.querySelector<HTMLElement>('#legend')!);
+const updateLegend = createLegend(document.querySelector<HTMLElement>('#legend')!, (kind) =>
+  findNearest(kind),
+);
 const intro = document.querySelector<HTMLElement>('#intro')!;
 const introStatus = intro.querySelector<HTMLElement>('.status')!;
 const introFill = intro.querySelector<HTMLElement>('.fill')!;
@@ -331,6 +346,7 @@ function arrive(
   place: Spot & { kind?: string; context?: string },
   { push = false, announce = false, keepZoom = false } = {},
 ) {
+  stopGlide();
   // A link's zoom wins; a search keeps the reader's; otherwise the default.
   zoom = place.zoom ?? (keepZoom ? zoom : DEFAULT_ZOOM);
   updateZoomControls();
@@ -569,9 +585,12 @@ function showRegion(text: string, card?: { eyebrow: string; name: string; detail
   playCard(card);
 }
 
-worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResult>) => {
+worker.onmessage = async (
+  e: MessageEvent<SceneResult | SceneProgress | NameResult | NearestResult>,
+) => {
   const msg = e.data;
   if (msg.type === 'named') return msg.id === regionId ? regionNamed(msg) : named(msg);
+  if (msg.type === 'nearest') return foundNearest(msg);
   if (msg.id === previewId) {
     if (msg.type === 'scene' && !scene) {
       preview = buildScene(msg, emptyFeatures, msg.ds);
@@ -587,6 +606,99 @@ worker.onmessage = async (e: MessageEvent<SceneResult | SceneProgress | NameResu
   }
   await acceptScene(msg);
 };
+
+// --- Legend: go to the nearest … -----------------------------------------------
+
+const FIND_NOUN: Record<FindKind, string> = {
+  city: 'city',
+  town: 'town',
+  village: 'village',
+  peak: 'summit',
+  museum: 'museum',
+  lake: 'lake',
+  ocean: 'coast',
+  river: 'river',
+  border: 'border',
+};
+/** Anything this close to the centre (screen px) is already here: find the next. */
+const FIND_CLEAR_PX = 24;
+/** Nearer than this many screens, glide there; farther, arrive as a search does. */
+const GLIDE_SCREENS = 2;
+const GLIDE_MS = 800;
+/** The widest view that draws museums (their tiles start at MUSEUM_MIN_ZOOM). */
+const MUSEUM_VIEW_ZOOM = ZOOMS.find((z) => z - DETAIL[z].vectorDrop >= MUSEUM_MIN_ZOOM)!;
+/** Named finds already visited, per kind: clicking again goes to the next nearest. */
+const visited = new Map<FindKind, Set<string>>();
+let nearestId = 0;
+
+function findNearest(kind: FindKind) {
+  // Search the map tiles this view loads (museums: the zoom that has them).
+  const vz = Math.max(zoom - DETAIL[zoom].vectorDrop, kind === 'museum' ? MUSEUM_MIN_ZOOM : 0);
+  const f = 2 ** (vz - zoom);
+  const req: NearestRequest = {
+    type: 'nearest',
+    id: ++nearestId,
+    kind,
+    z: vz,
+    x: cx * f,
+    y: cy * f,
+    min: FIND_CLEAR_PX * f,
+    skip: [...(visited.get(kind) ?? [])],
+  };
+  worker.postMessage(req);
+  track('legend_find', { kind });
+}
+
+function foundNearest({ id, kind, found }: NearestResult) {
+  if (id !== nearestId) return;
+  const noun = FIND_NOUN[kind];
+  if (!found) {
+    playCard({ eyebrow: 'Nothing nearby', name: `No ${noun} within reach` });
+    return;
+  }
+  if (found.name) {
+    if (!visited.has(kind)) visited.set(kind, new Set());
+    visited.get(kind)!.add(found.name);
+  }
+  const vz = Math.max(zoom - DETAIL[zoom].vectorDrop, kind === 'museum' ? MUSEUM_MIN_ZOOM : 0);
+  const f = 2 ** (zoom - vz);
+  const [tx, ty] = [found.x * f, found.y * f];
+  const km = (Math.hypot(tx - cx, ty - cy) * metresPerPx()) / 1000;
+  const detail = [
+    found.ele !== undefined ? `${fmt.format(found.ele)} m` : '',
+    `${km < 10 ? km.toFixed(1) : fmt.format(Math.round(km))} km away`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const near = Math.hypot(tx - cx, ty - cy) < GLIDE_SCREENS * Math.max(w, h);
+  if (near && (kind !== 'museum' || zoom >= MUSEUM_VIEW_ZOOM)) {
+    glideTo(tx, ty, () => {
+      if (found.name) playCard({ eyebrow: `Nearest ${noun}`, name: found.name, detail });
+    });
+    return;
+  }
+  const { lat, lon } = worldToLonLat(tx, ty, zoom);
+  const z = kind === 'museum' ? Math.max(zoom, MUSEUM_VIEW_ZOOM) : zoom;
+  arrive({ name: found.name, lat, lon, zoom: z, detail: `Nearest ${noun} · ${detail}` }, { push: true });
+}
+
+let glideFrame = 0;
+const stopGlide = () => cancelAnimationFrame(glideFrame);
+
+/** Pan smoothly to world point (tx, ty) at this zoom, then call `done`. */
+function glideTo(tx: number, ty: number, done: () => void) {
+  stopGlide();
+  const [sx, sy] = [cx, cy];
+  const t0 = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - t0) / GLIDE_MS);
+    const e = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2; // ease in-out
+    move(sx + (tx - sx) * e - cx, sy + (ty - sy) * e - cy);
+    if (t < 1) glideFrame = requestAnimationFrame(step);
+    else done();
+  };
+  glideFrame = requestAnimationFrame(step);
+}
 
 /** Wide views: the map tiles name few peaks, so add the famous summits. */
 const SUMMITS_BELOW = 11;
@@ -686,6 +798,7 @@ function updateZoomControls() {
 /** Step to `next`, keeping the world point under screen (ax, ay) in place. */
 function zoomTo(next: number, ax = w / 2, ay = h / 2) {
   if (!ZOOMS.includes(next) || next === zoom) return;
+  stopGlide();
   const f = 2 ** (next - zoom);
   cx = (cx - w / 2 + ax) * f - ax + w / 2;
   cy = (cy - h / 2 + ay) * f - ay + h / 2;
@@ -772,6 +885,7 @@ const spread = () => {
 };
 
 canvas.addEventListener('pointerdown', (e) => {
+  stopGlide();
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
   if (pointers.size === 1) {

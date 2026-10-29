@@ -205,6 +205,26 @@ body {
   width: 28px;
   height: 10px;
 }
+/* Rows that find their feature: the hover pad sits outside the layout. */
+.key .find {
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.key .find:hover,
+.key .find:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--rose) 10%, transparent);
+}
+.key .find:hover dd,
+.key .find:focus-visible dd {
+  color: var(--rose);
+}
+.key .find:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rose) 45%, transparent);
+}
 /* An icon drawn at map size: same column width, a taller row. */
 .key svg.tall {
   height: 16px;
