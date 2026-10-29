@@ -141,6 +141,24 @@ docker run -p 8080:8080 -e PORT=8080 -e REDIS_URL=redis://host:6379 topography
 if Playwright can't find one, and `SLUGS="everest k2"` to render just those.
 Fonts are subset with `scripts/subset-fonts.sh`, which needs fonttools.
 
+## Agent skills (optional)
+
+If you work on this repo with an AI coding agent, the project pins a few
+[agent skills](https://github.com/vercel-labs/skills) in `skills-lock.json`
+(currently [rust-skills](https://github.com/leonardomso/rust-skills), Rust
+guidelines for `crates/`). The skills themselves aren't committed; restore them
+with:
+
+```sh
+npx skills experimental_install   # into .agents/skills/, matching the lock's hashes
+```
+
+Claude Code finds them through the committed links in `.claude/skills/`, so
+`/rust-skills` works once they're restored. To add one, run
+`npx skills add <owner>/<repo> -a claude-code` and commit the updated
+`skills-lock.json` and the link it makes in `.claude/skills/`; `.agents/`
+stays ignored.
+
 ## Deploy
 
 [Railway](https://railway.com), from the `Dockerfile`, with a separate Redis
