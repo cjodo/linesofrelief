@@ -503,17 +503,30 @@ const PAGE_CSS = `
         .why-globe canvas { width: min(100%, 460px); }
         .why-text { grid-column: 1; grid-row: 1; }
       }
-      /* A landmark: its clay render standing on the page, glowing faintly. */
-      .render { position: relative; margin: 24px 0 0; display: grid; place-items: center; }
+      /* A landmark: its clay render standing on the page, glowing faintly, and
+         beside it (below, on phones) its site model. Each takes width in
+         proportion to its shape (--ar), so the two stand the same height. */
+      .renders {
+        display: flex; gap: 24px; align-items: flex-end;
+        margin: 24px calc(50% - min(50vw - 16px, 640px)) 0;
+      }
+      .renders figure { flex: var(--ar, 1) 1 0; min-width: 0; margin: 0; display: grid; justify-items: center; }
+      .renders img { display: block; width: 100%; height: auto; max-height: min(78vh, 760px); object-fit: contain; }
+      .renders-caption {
+        margin: 10px calc(50% - min(50vw - 16px, 640px)) 0; text-align: right;
+        font: 400 0.6rem/1.6 var(--mono); letter-spacing: 0.08em; color: var(--muted);
+      }
+      @media (max-width: 700px) {
+        .renders { flex-direction: column; align-items: stretch; }
+        .renders-caption { text-align: left; }
+      }
+      .render { position: relative; }
       .render::before {
         content: ''; position: absolute; inset: 12% 18% 6%; pointer-events: none; filter: blur(60px);
         background: radial-gradient(closest-side, color-mix(in srgb, var(--love) 22%, transparent), transparent);
       }
-      .render img { position: relative; display: block; width: auto; max-width: 100%; max-height: min(78vh, 760px); height: auto; }
+      .render img { position: relative; }
       .landmark-text { margin-top: 8px; }
-      .site-render { margin: 0; }
-      .site-render img { display: block; width: 100%; height: auto; }
-      .site-render figcaption { max-width: 60ch; margin-top: 12px; font: 400 0.62rem/1.6 var(--mono); letter-spacing: 0.08em; color: var(--muted); }
       .landmark-text h1 { color: var(--love); }
       .landmark-text .cta { border-color: color-mix(in srgb, var(--love) 45%, var(--overlay)); }
       .landmark-text .cta:hover, .landmark-text .cta:focus-visible { color: var(--love); border-color: var(--love); }
@@ -904,16 +917,42 @@ export function landmarkHtml(
   stylesheet: string,
   favicon: string,
   version?: (path: string) => string | undefined,
+  /** A public image's pixel size, when it exists. */
+  size?: (path: string) => { width: number; height: number } | undefined,
 ): string {
   const page = landmarkPage(l, site);
   const others = LANDMARKS.filter((o) => o !== l);
   const v = version?.(landmarkRender(l));
   // The site model shows on its page only (not the index, not the share image), once rendered.
   const siteV = version?.(landmarkSiteRender(l));
+  /** An image in the row: its intrinsic size, and its share of the width by its shape. */
+  const figure = (cls: string, path: string, hash: string | undefined, attrs: string) => {
+    const s = size?.(path);
+    const dims = s ? ` width="${s.width}" height="${s.height}"` : '';
+    const ar = s ? ` style="--ar: ${(s.width / s.height).toFixed(3)}"` : '';
+    return `<figure class="${cls}"${ar}>
+          <img src="${path}${hash ? `?v=${hash}` : ''}"${dims} ${attrs} />
+        </figure>`;
+  };
   const body = `      <header>
-        <figure class="render">
-          <img src="${landmarkRender(l)}${v ? `?v=${v}` : ''}" alt="${esc(page.imageAlt)}" fetchpriority="high" />
-        </figure>
+        <div class="renders">
+        ${figure('render', landmarkRender(l), v, `alt="${esc(page.imageAlt)}" fetchpriority="high"`)}${
+          siteV
+            ? `
+        ${figure(
+          'site',
+          landmarkSiteRender(l),
+          siteV,
+          `alt="A site model of the ${esc(l.name)} in its neighbourhood: the landmark in Rosé Pine red among grey buildings, with its water in blue"`,
+        )}`
+            : ''
+        }
+        </div>${
+          siteV
+            ? `
+        <p class="renders-caption">Beside it, its neighbourhood: buildings and water from OpenStreetMap, the ground from the map's terrain tiles.</p>`
+            : ''
+        }
         <div class="hero-text landmark-text">
           <p class="eyebrow">${esc(l.city)} · ${esc(l.country)}</p>
           <h1>${esc(l.name)}</h1>
@@ -935,19 +974,6 @@ export function landmarkHtml(
         the rest the one way it draws everything: <a href="${esc(landmarkMap(l))}">the ground under
         ${esc(l.city)}</a>, as contour lines coloured by height, with its water and its names.</p>
       </section>
-
-${
-  siteV
-    ? `
-      <h2>Its ground</h2>
-      <figure class="site-render">
-        <img src="${landmarkSiteRender(l)}?v=${siteV}" loading="lazy"
-          alt="A site model of the ${esc(l.name)} in its neighbourhood: the landmark in Rosé Pine red among grey buildings, with its water in blue" />
-        <figcaption>Its neighbourhood as a site model: buildings and water from OpenStreetMap, the ground from the
-        terrain tiles the map draws its contours from.</figcaption>
-      </figure>`
-    : ''
-}
 
       <h2>Other landmarks</h2>
       <ul class="near landmarks">${others

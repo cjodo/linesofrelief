@@ -67,6 +67,22 @@ function publicVersion(path: string): string | undefined {
   return createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 10);
 }
 
+/** A WebP's pixel size, from its header (lossy VP8, lossless VP8L or extended VP8X). */
+function publicSize(path: string): { width: number; height: number } | undefined {
+  const file = resolve(__dirname, 'public', path.replace(/^\//, ''));
+  if (!existsSync(file)) return undefined;
+  const b = readFileSync(file);
+  if (b.toString('ascii', 0, 4) !== 'RIFF' || b.toString('ascii', 8, 12) !== 'WEBP') return undefined;
+  const chunk = b.toString('ascii', 12, 16);
+  if (chunk === 'VP8X') return { width: 1 + b.readUIntLE(24, 3), height: 1 + b.readUIntLE(27, 3) };
+  if (chunk === 'VP8 ') return { width: b.readUInt16LE(26) & 0x3fff, height: b.readUInt16LE(28) & 0x3fff };
+  if (chunk === 'VP8L') {
+    const bits = b.readUInt32LE(21);
+    return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >> 14) & 0x3fff) };
+  }
+  return undefined;
+}
+
 const hasImage = (p: Peak) => existsSync(resolve(__dirname, 'public/og', `${p.slug}.jpg`));
 
 /** Fill the template's marked regions for one page. */
@@ -133,7 +149,7 @@ function sitePages(): Plugin {
         if (landmark) {
           const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
           res.setHeader('Content-Type', 'text/html');
-          res.end(landmarkHtml(landmark, SITE_URL, '/src/style.css', faviconOf(template), publicVersion));
+          res.end(landmarkHtml(landmark, SITE_URL, '/src/style.css', faviconOf(template), publicVersion, publicSize));
           return;
         }
         const match = path.match(ROUTE);
@@ -190,7 +206,7 @@ function sitePages(): Plugin {
           this.emitFile({
             type: 'asset',
             fileName: `${landmarkPath(l).slice(1)}index.html`,
-            source: landmarkHtml(l, SITE_URL, stylesheet, favicon, publicVersion),
+            source: landmarkHtml(l, SITE_URL, stylesheet, favicon, publicVersion, publicSize),
           });
         }
 
