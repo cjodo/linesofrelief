@@ -9,6 +9,7 @@
 //! If PORT is taken, the next free port is used. Without Redis it still
 //! works, as a plain proxy.
 
+mod museum_info;
 mod mvt;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -91,6 +92,13 @@ const MUSEUM_POLICY: Policy = Policy {
     content_type: "application/json",
 };
 
+/// A write-up changes when its article does: rarely.
+const MUSEUM_INFO_POLICY: Policy = Policy {
+    redis_ttl: 30 * DAY,
+    cache_control: "public, max-age=86400",
+    content_type: "application/json",
+};
+
 struct App {
     http: reqwest::Client,
     redis: Option<ConnectionManager>,
@@ -144,6 +152,7 @@ async fn main() {
         .route("/api/search", get(search))
         .route("/api/reverse", get(reverse))
         .route("/api/museums/{z}/{x}/{file}", get(museums))
+        .route("/api/museum-info", get(museum_info))
         .with_state(app)
         .fallback_service(ServeDir::new(static_dir))
         .layer(middleware::from_fn(browser_cache))
@@ -225,6 +234,29 @@ async fn museums(State(app): State<Shared>, Path((z, x, file)): Path<(u32, u32, 
     };
     let key = format!("museums:v1:{z}/{x}/{y}");
     cached_body(&app, &key, &MUSEUM_POLICY, || museums_in(&app, z, x, y)).await
+}
+
+#[derive(Deserialize)]
+struct MuseumQuery {
+    name: String,
+    lat: f64,
+    lon: f64,
+}
+
+/// A museum's write-up from Wikipedia (see museum_info.rs); `null` when there's none.
+async fn museum_info(State(app): State<Shared>, Query(q): Query<MuseumQuery>) -> Response {
+    let name = q.name.trim();
+    if name.is_empty() || name.len() > 200 || !(-90.0..=90.0).contains(&q.lat) || !(-180.0..=180.0).contains(&q.lon) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    // ~10 m cells: a museum's position comes from the same tiles every time.
+    let (lat, lon) = ((q.lat * 1e4).round() / 1e4, (q.lon * 1e4).round() / 1e4);
+    let key = format!("museum-info:v1:{}@{lat},{lon}", name.to_lowercase());
+    cached_body(&app, &key, &MUSEUM_INFO_POLICY, || async {
+        let info = museum_info::lookup(&app.http, name, lat, lon).await?;
+        Ok(serde_json::to_vec(&info)?)
+    })
+    .await
 }
 
 /// Read the museums out of every z14 tile under (z, x, y). The big source
