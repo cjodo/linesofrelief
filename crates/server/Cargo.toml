@@ -19,3 +19,11 @@ tower-http = { version = "0.7", features = ["fs", "compression-gzip", "compressi
 lto = true
 codegen-units = 1
 strip = true
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["rayon"] }
+topography-server = { path = "." }
+
+[[bench]]
+name = "server_benchmark"
+harness = false
