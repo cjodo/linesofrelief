@@ -1,10 +1,11 @@
 /**
  * Build-time rendering for the static pages: the map at /, a landing page per
- * summit at /mountains/<slug>/ (the same app, arriving at that summit), and
- * the /mountains/ index. Imported by vite.config.ts only.
+ * summit at /mountains/<slug>/ (the same app, arriving at that summit), the
+ * /mountains/ index and /why/. Imported by vite.config.ts only.
  */
 import { FAVORITES } from './favorites.ts';
 import { detailOf, PEAKS, type Peak } from './peaks.ts';
+import { WHY } from './why.ts';
 
 export interface Page {
   path: string;
@@ -183,6 +184,25 @@ export function hubPage(site: string): Page {
           url: `${site}${peakPath(p)}`,
           name: p.name,
         })),
+      },
+    ],
+  };
+}
+
+export function whyPage(site: string): Page {
+  return {
+    path: '/why/',
+    title: `Why · ${SITE_NAME}`,
+    description: WHY.lede,
+    image: '/og.jpg',
+    imageAlt: 'Contour lines drawn in teal, iris, rose and gold on a dark background',
+    jsonLd: [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'AboutPage',
+        name: `Why ${SITE_NAME}`,
+        url: `${site}/why/`,
+        description: WHY.lede,
       },
     ],
   };
@@ -484,13 +504,13 @@ interface Shell {
   stylesheet: string;
   favicon: string;
   version?: (path: string) => string | undefined;
-  /** The nav's current item: the index, or a summit (with a link to its map). */
-  current: 'summits' | Peak;
+  /** The nav's current item: the index, /why/, or a summit (with a link to its map). */
+  current: 'summits' | 'why' | Peak;
   body: string;
 }
 
 function shell({ page, site, stylesheet, favicon, version, current, body }: Shell): string {
-  const summit = current === 'summits' ? null : current;
+  const summit = typeof current === 'string' ? null : current;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -514,7 +534,8 @@ ${analyticsHtml()}
     <main class="page">
       <nav class="nav" aria-label="Site">
         <a class="brand" href="/">Topography</a>
-        <a href="/mountains/"${summit ? '' : ' aria-current="page"'}>Summits</a>
+        <a href="/mountains/"${current === 'summits' ? ' aria-current="page"' : ''}>Summits</a>
+        <a href="/why/"${current === 'why' ? ' aria-current="page"' : ''}>Why</a>
         ${favoritesNav()}
         ${summit ? `<a href="${mapPath(summit)}">Live map</a>` : ''}
       </nav>
@@ -522,6 +543,7 @@ ${body}
       <footer>
         <a href="/">Search the whole world →</a>
         <a href="/mountains/">All summits</a>
+        <a href="/why/">Why this map</a>
         ${summit ? `<a href="${mapPath(summit)}">${esc(summit.name)} on the live map</a>` : ''}
         <a href="#" class="consent-link" data-consent>Cookies</a>
         <span class="credits">${CREDITS}</span>
@@ -567,6 +589,37 @@ export function hubHtml(
       <p class="lede">${esc(page.description)}</p>
       <ol class="list" style="margin-top: 56px">${rows}
       </ol>`,
+  });
+}
+
+/** /why/: the reasons, one short section each (the words live in site/why.ts). */
+export function whyHtml(
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version?: (path: string) => string | undefined,
+): string {
+  const sections = WHY.sections
+    .map(
+      (s) => `
+      <section class="prose">
+        <h2>${esc(s.heading)}</h2>
+        ${s.paragraphs.map((p) => `<p>${p}</p>`).join('\n        ')}
+      </section>`,
+    )
+    .join('');
+  return shell({
+    page: whyPage(site),
+    site,
+    stylesheet,
+    favicon,
+    version,
+    current: 'why',
+    body: `      <h1>${esc(WHY.title)}</h1>
+      <p class="lede">${esc(WHY.lede)}</p>${sections}
+      <section class="prose">
+        <p>${WHY.closing}</p>
+      </section>`,
   });
 }
 
@@ -684,6 +737,7 @@ export function sitemap(site: string, hasImage: (p: Peak) => boolean): string {
   const urls: { loc: string; image?: string }[] = [
     { loc: `${site}/`, image: `${site}/og.jpg` },
     { loc: `${site}/mountains/` },
+    { loc: `${site}/why/` },
     ...PEAKS.map((p) => ({
       loc: `${site}${peakPath(p)}`,
       image: hasImage(p) ? `${site}/og/${p.slug}.jpg` : undefined,
