@@ -34,7 +34,8 @@ import { createTextSize, storedScale } from './textsize';
 import { createLegend } from './legend';
 import { createCollection } from './collection';
 import { buildScene, draw, type Scene } from './render';
-import { createSearch, type Place } from './search';
+import { createSearch } from './search';
+import { createCoordEntry } from './coord-entry';
 import { track } from './analytics';
 import { greet } from './banner';
 import { PEAKS } from '../site/peaks';
@@ -66,7 +67,10 @@ const canvas = document.querySelector<HTMLCanvasElement>('#map')!;
 const ctx = canvas.getContext('2d')!;
 const previewCanvas = document.querySelector<HTMLCanvasElement>('#preview')!;
 const pctx = previewCanvas.getContext('2d')!;
-const readout = document.querySelector<HTMLElement>('#coords')!;
+const showCoords = createCoordEntry(document.querySelector<HTMLInputElement>('#coords')!, (at) => {
+  track('coords_entry');
+  arrive(at, { push: true, announce: true, keepZoom: true });
+});
 const updateLegend = createLegend(document.querySelector<HTMLElement>('#legend')!, (kind) =>
   findNearest(kind),
 );
@@ -162,7 +166,7 @@ function requestDraw() {
       prerenderImg!.style.setProperty('--dy', `${arrival.y - cy}px`);
     }
     const { lat, lon } = worldToLonLat(cx, cy, zoom);
-    readout.textContent = formatLonLat(lat, lon);
+    showCoords(formatLonLat(lat, lon));
     minimap(cx, cy, zoom);
     showScale(lat);
     discover();
@@ -1082,9 +1086,11 @@ window.addEventListener(
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 window.addEventListener('resize', resize);
-createSearch(document.querySelector<HTMLElement>('#search')!, (place: Place) => {
+const fitPlaceholder = createSearch(document.querySelector<HTMLElement>('#search')!, (place) => {
   track('search_select', { kind: place.kind, name: place.name });
-  arrive(place, { push: true, announce: true, keepZoom: true });
+  // Typed coordinates carry no name: the map names the place it lands on.
+  const spot = place.kind === 'coordinates' ? { lat: place.lat, lon: place.lon } : place;
+  arrive(spot, { push: true, announce: true, keepZoom: true });
 });
 createShare(document.querySelector<HTMLButtonElement>('#share')!, () => {
   const link = currentLink();
@@ -1098,6 +1104,7 @@ let lastScene: SceneResult | null = null;
 setLabelScale(storedScale());
 createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
   setLabelScale(scale);
+  fitPlaceholder();
   if (!scene || !lastScene) return;
   const m = lastScene;
   const keep = new Set(scene.features.labels.map((p) => labelKey(p.label)));

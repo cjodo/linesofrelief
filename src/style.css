@@ -731,6 +731,49 @@ body:has(.search.searching) .loading-bar {
   color: var(--subtle);
   white-space: pre;
 }
+/* The readout is also a box to type coordinates in: text until touched. */
+.coord-entry {
+  all: unset;
+  field-sizing: content;
+  min-width: 8ch;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 2px;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: right;
+  white-space: pre;
+  pointer-events: auto;
+  cursor: text;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    color 0.2s ease;
+}
+.coord-entry:hover {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--subtle) 45%, transparent);
+}
+.coord-entry:focus {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--iris) 55%, var(--overlay));
+}
+.coord-entry::selection {
+  background: color-mix(in srgb, var(--iris) 35%, transparent);
+}
+.coord-entry.invalid {
+  box-shadow: inset 0 0 0 1px var(--love);
+  animation: nudge 0.35s ease;
+}
+@keyframes nudge {
+  25% {
+    translate: -3px 0;
+  }
+  75% {
+    translate: 3px 0;
+  }
+}
 .pulse {
   width: 5px;
   height: 5px;
@@ -1372,6 +1415,9 @@ body:not(.loaded) .locator {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .coord-entry.invalid {
+    animation: none;
+  }
   #preview.ready {
     animation: none;
   }

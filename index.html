@@ -45,7 +45,17 @@
     <aside id="collection" class="collection" aria-label="Museums"></aside>
     <aside class="locator" aria-label="Where you are">
       <p id="region" class="region empty" aria-live="polite"></p>
-      <p class="coords"><span class="pulse" aria-hidden="true"></span><span id="coords"></span></p>
+      <p class="coords"><span class="pulse" aria-hidden="true"></span><input
+          id="coords"
+          class="coord-entry"
+          type="text"
+          inputmode="text"
+          enterkeyhint="go"
+          spellcheck="false"
+          autocomplete="off"
+          aria-label="Coordinates of the centre; type new ones to go there"
+          title="Type coordinates to go there"
+        /></p>
       <div class="zoombar">
         <span class="scalebar" aria-hidden="true"><span></span></span>
         <button id="zoom-out" class="zoom" type="button" aria-label="Zoom out" title="Zoom out (−)">
@@ -84,7 +94,8 @@
       <input
         type="search"
         placeholder="Find a peak, lake, town or country"
-        aria-label="Find a peak, lake, town or country"
+        aria-label="Find a peak, lake, town or country, or go to coordinates"
+        title="A place, or coordinates like 51.18, -115.57"
         role="combobox"
         aria-autocomplete="list"
         aria-controls="results"
