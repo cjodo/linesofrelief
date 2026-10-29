@@ -4,6 +4,7 @@
  * /mountains/ index and /why/. Imported by vite.config.ts only.
  */
 import { FAVORITES } from './favorites.ts';
+import { LANDMARKS, landmarkImage, landmarkPath, landmarkRender, type Landmark } from './landmarks.ts';
 import { detailOf, PEAKS, type Peak } from './peaks.ts';
 import { WHY } from './why.ts';
 
@@ -502,6 +503,18 @@ const PAGE_CSS = `
         .why-globe canvas { width: min(100%, 460px); }
         .why-text { grid-column: 1; grid-row: 1; }
       }
+      /* A landmark: its clay render standing on the page, glowing faintly. */
+      .render { position: relative; margin: 24px 0 0; display: grid; place-items: center; }
+      .render::before {
+        content: ''; position: absolute; inset: 12% 18% 6%; pointer-events: none; filter: blur(60px);
+        background: radial-gradient(closest-side, color-mix(in srgb, var(--love) 22%, transparent), transparent);
+      }
+      .render img { position: relative; display: block; width: auto; max-width: 100%; max-height: min(78vh, 760px); height: auto; }
+      .landmark-text { margin-top: 8px; }
+      .landmark-text h1 { color: var(--love); }
+      .landmark-text .cta { border-color: color-mix(in srgb, var(--love) 45%, var(--overlay)); }
+      .landmark-text .cta:hover, .landmark-text .cta:focus-visible { color: var(--love); border-color: var(--love); }
+      .near.landmarks li a:hover .name { color: var(--love); }
       .near { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--overlay); }
       .near li a {
         display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
@@ -524,13 +537,16 @@ interface Shell {
   stylesheet: string;
   favicon: string;
   version?: (path: string) => string | undefined;
-  /** The nav's current item: the index, /why/, or a summit (with a link to its map). */
-  current: 'summits' | 'why' | Peak;
+  /** The nav's current item: the index, /why/, a landmark, or a summit (with a link to its map). */
+  current: 'summits' | 'why' | 'landmark' | Peak;
+  /** Where "Live map" goes, when it isn't a summit's own map. */
+  live?: { href: string; name: string };
   body: string;
 }
 
-function shell({ page, site, stylesheet, favicon, version, current, body }: Shell): string {
+function shell({ page, site, stylesheet, favicon, version, current, live, body }: Shell): string {
   const summit = typeof current === 'string' ? null : current;
+  const map = summit ? { href: mapPath(summit), name: summit.name } : live;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -557,14 +573,14 @@ ${analyticsHtml()}
         <a href="/mountains/"${current === 'summits' ? ' aria-current="page"' : ''}>Summits</a>
         <a href="/why/"${current === 'why' ? ' aria-current="page"' : ''}>Why</a>
         ${favoritesNav()}
-        ${summit ? `<a href="${mapPath(summit)}">Live map</a>` : ''}
+        ${map ? `<a href="${esc(map.href)}">Live map</a>` : ''}
       </nav>
 ${body}
       <footer>
         <a href="/">Search the whole world →</a>
         <a href="/mountains/">All summits</a>
         <a href="/why/">Why this map</a>
-        ${summit ? `<a href="${mapPath(summit)}">${esc(summit.name)} on the live map</a>` : ''}
+        ${map ? `<a href="${esc(map.href)}">${esc(map.name)} on the live map</a>` : ''}
         <a href="#" class="consent-link" data-consent>Cookies</a>
         <span class="credits">${CREDITS}</span>
       </footer>
@@ -776,6 +792,99 @@ ${
   return shell({ page, site, stylesheet, favicon, version, current: p, body });
 }
 
+// --- Landmarks ----------------------------------------------------------------
+
+/** Where a landmark's "live map" link arrives: the map, at the closest scale. */
+export const landmarkMap = (l: Landmark) =>
+  `/?${new URLSearchParams({ name: l.name, lat: String(l.lat), lon: String(l.lon), z: '13' })}`;
+
+const landmarkDescription = (l: Landmark) =>
+  `${l.name}, ${l.city}, ${l.country}: ${fmt.format(l.height)} m, ${l.built}. A clay render in Rosé Pine, ` +
+  'and the ground it stands on drawn as contour lines.';
+
+export function landmarkPage(l: Landmark, site: string): Page {
+  const url = `${site}${landmarkPath(l)}`;
+  const description = landmarkDescription(l);
+  return {
+    path: landmarkPath(l),
+    title: `${l.name} · ${l.city} · ${SITE_NAME}`,
+    description,
+    image: landmarkImage(l),
+    imageAlt: `A clay model of the ${l.name}, rendered in Rosé Pine red on a dark background`,
+    jsonLd: [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'LandmarksOrHistoricalBuildings',
+        name: l.name,
+        description,
+        url,
+        image: `${site}${landmarkImage(l)}`,
+        geo: { '@type': 'GeoCoordinates', latitude: l.lat, longitude: l.lon },
+        address: { '@type': 'PostalAddress', addressLocality: l.city, addressCountry: l.country },
+      },
+    ],
+  };
+}
+
+/** A landmark's page: its render, a few facts, and the way to its ground on the map. */
+export function landmarkHtml(
+  l: Landmark,
+  site: string,
+  stylesheet: string,
+  favicon: string,
+  version?: (path: string) => string | undefined,
+): string {
+  const page = landmarkPage(l, site);
+  const others = LANDMARKS.filter((o) => o !== l);
+  const v = version?.(landmarkRender(l));
+  const body = `      <header>
+        <figure class="render">
+          <img src="${landmarkRender(l)}${v ? `?v=${v}` : ''}" alt="${esc(page.imageAlt)}" fetchpriority="high" />
+        </figure>
+        <div class="hero-text landmark-text">
+          <p class="eyebrow">${esc(l.city)} · ${esc(l.country)}</p>
+          <h1>${esc(l.name)}</h1>
+          <p class="detail">${fmt.format(l.height)} metres · ${fmt.format(toFeet(l.height))} feet</p>
+          <a class="cta" href="${esc(landmarkMap(l))}">See its ground on the live map →</a>
+        </div>
+      </header>
+
+      <dl class="facts">
+        <div><dt>Height</dt><dd>${fmt.format(l.height)} m<small>${fmt.format(toFeet(l.height))} ft</small></dd></div>
+        <div><dt>Completed</dt><dd>${esc(l.built)}</dd></div>
+        <div><dt>By</dt><dd>${esc(l.by)}</dd></div>
+        <div><dt>Coordinates</dt><dd>${dms(l.lat, 'N', 'S')}<small>${dms(l.lon, 'E', 'W')} · ${l.lat.toFixed(4)}, ${l.lon.toFixed(4)}</small></dd></div>
+      </dl>
+
+      <section class="prose">
+        <p>${esc(l.about)}</p>
+        <p>Modelled from simple shapes at roughly its true size, and rendered in clay. The map draws
+        the rest the one way it draws everything: <a href="${esc(landmarkMap(l))}">the ground under
+        ${esc(l.city)}</a>, as contour lines coloured by height, with its water and its names.</p>
+      </section>
+
+      <h2>Other landmarks</h2>
+      <ul class="near landmarks">${others
+        .map(
+          (o) => `
+        <li><a href="${landmarkPath(o)}"><span class="name">${esc(o.name)}</span>
+          <span class="dist">${esc(o.city)} · ${fmt.format(o.height)} m</span></a></li>`,
+        )
+        .join('')}
+      </ul>`;
+
+  return shell({
+    page,
+    site,
+    stylesheet,
+    favicon,
+    version,
+    current: 'landmark',
+    live: { href: landmarkMap(l), name: l.name },
+    body,
+  });
+}
+
 export function sitemap(site: string, hasImage: (p: Peak) => boolean): string {
   const today = new Date().toISOString().slice(0, 10);
   const urls: { loc: string; image?: string }[] = [
@@ -786,6 +895,7 @@ export function sitemap(site: string, hasImage: (p: Peak) => boolean): string {
       loc: `${site}${peakPath(p)}`,
       image: hasImage(p) ? `${site}/og/${p.slug}.jpg` : undefined,
     })),
+    ...LANDMARKS.map((l) => ({ loc: `${site}${landmarkPath(l)}`, image: `${site}${landmarkImage(l)}` })),
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">

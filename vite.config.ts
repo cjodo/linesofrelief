@@ -9,6 +9,7 @@ import {
   analyticsHtml,
   favoritesNav,
   hubHtml,
+  landmarkHtml,
   mapPath,
   peakPage,
   peakPath,
@@ -21,6 +22,7 @@ import {
   whyHtml,
   type Page,
 } from './site/pages';
+import { LANDMARKS, landmarkPath } from './site/landmarks';
 import { PEAKS, type Peak } from './site/peaks';
 
 /** Public origin of the site; override with SITE_URL=https://… at build time. */
@@ -44,6 +46,7 @@ useAnalytics(TAG_OK ? TAG_ID : '');
 
 const ROUTE = /^\/mountains\/?(?:([a-z0-9-]+)\/?(map\/?)?)?$/;
 const WHY_ROUTE = /^\/why\/?$/;
+const LANDMARK_ROUTE = /^\/landmarks\/([a-z0-9-]+)\/?$/;
 const faviconOf = (html: string) => html.match(/<link rel="icon"[^>]*>/)?.[0] ?? '';
 
 const hasPrerender = (key: string) =>
@@ -108,7 +111,7 @@ function sitePages(): Plugin {
       order: 'pre',
       handler: (html) => render(html, root()),
     },
-    // Dev has no generated files, so render /mountains/, its summits and /why/ on request.
+    // Dev has no generated files, so render /mountains/, its summits, the landmarks and /why/ on request.
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const path = (req.url ?? '').split('?')[0];
@@ -116,6 +119,13 @@ function sitePages(): Plugin {
           const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
           res.setHeader('Content-Type', 'text/html');
           res.end(whyHtml(SITE_URL, '/src/style.css', faviconOf(template), `/${GLOBE_ENTRY}`, publicVersion));
+          return;
+        }
+        const landmark = LANDMARKS.find((l) => l.slug === path.match(LANDMARK_ROUTE)?.[1]);
+        if (landmark) {
+          const template = readFileSync(resolve(__dirname, 'index.html'), 'utf8');
+          res.setHeader('Content-Type', 'text/html');
+          res.end(landmarkHtml(landmark, SITE_URL, '/src/style.css', faviconOf(template), publicVersion));
           return;
         }
         const match = path.match(ROUTE);
@@ -160,6 +170,14 @@ function sitePages(): Plugin {
             type: 'asset',
             fileName: `${mapPath(p).slice(1)}index.html`,
             source: render(html, summit(p)),
+          });
+        }
+
+        for (const l of LANDMARKS) {
+          this.emitFile({
+            type: 'asset',
+            fileName: `${landmarkPath(l).slice(1)}index.html`,
+            source: landmarkHtml(l, SITE_URL, stylesheet, favicon, publicVersion),
           });
         }
 
