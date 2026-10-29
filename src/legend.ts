@@ -103,8 +103,15 @@ export function createLegend(root: HTMLElement, onFind: (kind: FindKind) => void
   const majorEl = root.querySelector<HTMLElement>('.major')!;
   const minorEl = root.querySelector<HTMLElement>('.minor')!;
 
-  /** Colour range and the contour intervals of the zoom level on screen. */
-  return function update(lo: number, hi: number, minor: number, major: number) {
+  const museumRow = root.querySelector<HTMLElement>('[data-find="museum"]')!;
+  museumRow.hidden = true;
+
+  /**
+   * Colour range and the contour intervals of the zoom level on screen;
+   * `museums`: whether the map around the view has any (the row shows only then).
+   */
+  return function update(lo: number, hi: number, minor: number, major: number, museums: boolean) {
+    museumRow.hidden = !museums;
     majorEl.textContent = `${fmt.format(major)} m`;
     minorEl.textContent = `${fmt.format(minor)} m`;
     const key = `${lo}:${hi}`;
