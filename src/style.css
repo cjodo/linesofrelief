@@ -155,6 +155,108 @@ body {
   text-transform: uppercase;
   color: var(--muted);
 }
+/* The colours, along the bottom of a folded legend (larger screens only). */
+.legend-ramp {
+  display: none;
+}
+
+/* Larger screens: the header folds the legend to itself, its colours kept
+   as a thin ramp along the bottom. The rows ease shut (0fr), the body fades
+   first, and the ramp draws in from the left once there's room for it. */
+@media (min-width: 521px) and (min-height: 601px) {
+  .legend {
+    --fold: 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    transition:
+      opacity 1.2s ease 0.4s,
+      transform 1.2s ease 0.4s,
+      grid-template-rows var(--fold);
+  }
+  .legend.folded {
+    grid-template-rows: auto 0fr auto;
+  }
+  .legend-body {
+    min-height: 0;
+    overflow: hidden;
+    transition: opacity 0.3s ease 0.15s;
+  }
+  .legend.folded .legend-body {
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+  .legend-head {
+    cursor: pointer;
+    gap: 10px;
+    transition:
+      padding-bottom var(--fold),
+      border-color var(--fold);
+  }
+  .legend.folded .legend-head {
+    padding-bottom: 0;
+    border-bottom-color: transparent;
+  }
+  .legend-head:focus-visible {
+    outline: 1px solid var(--subtle);
+    outline-offset: 6px;
+  }
+  .legend .unit {
+    margin-left: auto;
+  }
+  .chevron {
+    display: block;
+    width: 7px;
+    height: 7px;
+    border-right: 1px solid var(--muted);
+    border-top: 1px solid var(--muted);
+    transform: translateY(-2px) rotate(135deg);
+    transition:
+      transform 0.35s ease,
+      border-color 0.2s ease;
+  }
+  .legend-head:hover .chevron,
+  .legend-head:focus-visible .chevron {
+    border-color: var(--text);
+  }
+  .legend.folded .chevron {
+    transform: translateY(2px) rotate(-45deg);
+  }
+  .legend-ramp {
+    display: block;
+    height: 3px;
+    max-height: 0;
+    margin-top: 0;
+    border-radius: 2px;
+    opacity: 0;
+    transform: scaleX(0.2);
+    transform-origin: left;
+    transition:
+      max-height var(--fold),
+      margin-top var(--fold),
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+  .legend.folded .legend-ramp {
+    max-height: 3px;
+    margin-top: 14px;
+    opacity: 1;
+    transform: none;
+    transition:
+      max-height var(--fold),
+      margin-top var(--fold),
+      opacity 0.35s ease 0.2s,
+      transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) 0.2s;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .legend,
+  .legend-body,
+  .legend-head,
+  .legend-ramp,
+  .chevron {
+    transition: none !important;
+  }
+}
 
 .scale {
   position: relative;
