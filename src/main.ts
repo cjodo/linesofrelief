@@ -41,6 +41,8 @@ import { createCoordEntry } from './coord-entry';
 import { track } from './analytics';
 import { greet } from './banner';
 import { PEAKS } from '../site/peaks';
+import { landmarkPath } from '../site/landmarks';
+import { drawLandmarks, landmarkAt, liftLandmark } from './landmarks';
 import type { Label } from './tiles';
 import { bundleUrl, decodeScene, favoriteFor, favoriteRequest } from './bundle';
 import type { Favorite } from '../site/favorites';
@@ -126,6 +128,8 @@ let preview: Scene | null = null;
 let nextId = 0;
 /** In-flight requests we still care about; anything else is stale. */
 let detailId = -1;
+/** Text size, for what's drawn over the scene (landmarks). */
+let textScale = storedScale();
 let previewId = -1;
 
 const formatLonLat = (lat: number, lon: number) =>
@@ -159,6 +163,7 @@ function requestDraw() {
     if (scene) {
       ctx.clearRect(0, 0, w, h);
       draw(ctx, scene, x0, y0, w, h, zoom);
+      drawLandmarks(ctx, landmarkView());
     }
     if (preview) {
       pctx.clearRect(0, 0, w, h);
@@ -176,6 +181,8 @@ function requestDraw() {
     discover();
   });
 }
+
+const landmarkView = () => ({ x: cx - w / 2, y: cy - h / 2, w, h, zoom, scale: textScale });
 
 // --- Discovery --------------------------------------------------------------
 
@@ -1092,11 +1099,13 @@ canvas.addEventListener('pointermove', (e) => {
     // Hovering (no button down): famous peaks show as links.
     if (e.pointerType === 'mouse') {
       const at = { x: e.clientX, y: e.clientY };
-      const town = townAt(at.x, at.y);
+      const landmark = landmarkAt(ctx, at.x, at.y, landmarkView());
+      if (liftLandmark(landmark)) requestDraw();
+      const town = landmark ? null : townAt(at.x, at.y);
       collection.hover(town, at);
-      const museum = town ? null : museumAt(at.x, at.y);
+      const museum = town || landmark ? null : museumAt(at.x, at.y);
       hoverMuseum(museum, at);
-      const linkable = town || museum || famousPeakAt(at.x, at.y);
+      const linkable = landmark || town || museum || famousPeakAt(at.x, at.y);
       canvas.classList.toggle('linkable', Boolean(linkable));
     }
     return;
@@ -1126,7 +1135,11 @@ const endPointer = (e: PointerEvent) => {
     press.moved < CLICK_MOVE_PX &&
     performance.now() - press.at < CLICK_MS;
   press = null;
-  if (click) {
+  const landmark = click ? landmarkAt(ctx, e.clientX, e.clientY, landmarkView()) : null;
+  if (landmark) {
+    track('landmark_open', { name: landmark.name });
+    location.assign(landmarkPath(landmark));
+  } else if (click) {
     // A tap on a town opens its museums (touch has no hover); elsewhere closes them.
     const museum = museumAt(e.clientX, e.clientY);
     const town = museum ? null : townAt(e.clientX, e.clientY);
@@ -1153,6 +1166,7 @@ canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointerleave', (e) => {
   if (e.pointerType !== 'mouse') return;
   const at = { x: e.clientX, y: e.clientY };
+  if (liftLandmark(null)) requestDraw();
   collection.hover(null, at);
   hoverMuseum(null, at);
 });
@@ -1227,9 +1241,10 @@ const minimap = createMinimap(document.querySelector<HTMLElement>('.minimap')!);
 
 /** The last detailed scene's raw data, so labels can be re-laid out (text size). */
 let lastScene: SceneResult | null = null;
-setLabelScale(storedScale());
+setLabelScale(textScale);
 createTextSize(document.querySelector<HTMLElement>('.textsize')!, (scale) => {
   setLabelScale(scale);
+  textScale = scale;
   fitPlaceholder();
   if (!scene || !lastScene) return;
   const m = lastScene;
