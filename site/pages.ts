@@ -440,7 +440,7 @@ const PAGE_CSS = `
       }
       .list .name { font: italic 400 clamp(1.5rem, 4vw, 2.1rem) / 1.05 var(--serif); transition: color 0.2s; }
       .list li a:hover .name, .list li a:focus-visible .name { color: var(--rose); }
-      .list li a[aria-current] .name { color: var(--gold, #f6c177); }
+      .list li a[aria-current] .name { color: var(--gold); }
       .list .ele { font: 400 0.8rem/1 var(--mono); letter-spacing: 0.08em; color: var(--subtle); font-variant-numeric: tabular-nums; }
       .list .bar {
         grid-column: 1 / -1; height: 2px; width: var(--w); border-radius: 1px;
@@ -486,6 +486,17 @@ const PAGE_CSS = `
       .why { display: grid; gap: 8px; }
       .why-globe { margin: 24px 0 0; }
       .why-globe canvas { display: block; width: min(72vw, 320px); aspect-ratio: 1; margin: 0 auto; }
+      /* Where the data comes from, and where to give back. */
+      .sources { max-width: 60ch; margin-top: 64px; }
+      .sources-intro { margin: 0 0 24px; font: italic 400 1.15rem/1.5 var(--serif); color: var(--subtle); }
+      .sources ul { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--overlay); }
+      .sources li { padding: 18px 0 20px; border-bottom: 1px solid var(--overlay); }
+      .sources .name { font: italic 400 1.45rem/1.15 var(--serif); color: var(--text); text-decoration: none; }
+      .sources .name:hover { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--rose) 60%, transparent); text-underline-offset: 3px; }
+      .sources .use { margin: 6px 0 10px; font: 400 0.98rem/1.45 var(--serif); color: var(--subtle); }
+      .sources .give { font: 400 0.62rem/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); text-decoration: none; }
+      .sources a.give:hover { text-decoration: underline; text-underline-offset: 3px; }
+      .sources .give.none { margin: 0; color: var(--muted); }
       @media (min-width: 1000px) {
         .why { grid-template-columns: minmax(0, 60ch) 1fr; column-gap: 64px; align-items: start; }
         .why-globe { grid-column: 2; grid-row: 1; position: sticky; top: 96px; margin-top: 72px; }
@@ -632,6 +643,25 @@ export function whyHtml(
       <div class="why-text">
       <h1>${esc(WHY.title)}</h1>
       <p class="lede">${esc(WHY.lede)}</p>
+      <section class="sources">
+        <h2>${esc(WHY.sources.heading)}</h2>
+        <p class="sources-intro">${esc(WHY.sources.intro)}</p>
+        <ul>${WHY.sources.list
+          .map(
+            (src) => `
+          <li>
+            <a class="name" href="${esc(src.url)}">${esc(src.name)}</a>
+            <p class="use">${esc(src.use)}</p>
+            ${
+              src.donate
+                ? `<a class="give" href="${esc(src.donate.url)}">${esc(src.donate.label)} ↗</a>`
+                : `<p class="give none">${esc(src.note ?? '')}</p>`
+            }
+          </li>`,
+          )
+          .join('')}
+        </ul>
+      </section>
       </div>
       </div>
       <script type="module" src="${script}"></script>`,
