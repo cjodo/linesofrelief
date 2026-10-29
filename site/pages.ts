@@ -482,7 +482,7 @@ const PAGE_CSS = `
       .prose { max-width: 60ch; margin-top: 48px; }
       .prose p { margin: 0 0 1.1em; font: italic 400 1.3rem/1.5 var(--serif); color: color-mix(in srgb, var(--text) 88%, var(--subtle)); }
       .prose a { text-decoration-color: color-mix(in srgb, var(--rose) 60%, transparent); text-underline-offset: 3px; }
-      /* /why/: the reasons on the left, the globe turning beside them (above, on phones). */
+      /* /why/: the words on the left, the globe turning beside them (above, on phones). */
       .why { display: grid; gap: 8px; }
       .why-globe { margin: 24px 0 0; }
       .why-globe canvas {
@@ -612,9 +612,9 @@ export function hubHtml(
 const GLOBE_TEXTURE = '/globe.png';
 
 /**
- * /why/: the reasons, one short section each (the words live in site/why.ts),
- * beside the Earth's contours slowly turning. `script` is the globe's module
- * (src/globe-page.ts, bundled).
+ * /why/: a line on why (the words live in site/why.ts) beside the Earth's
+ * contours slowly turning. `script` is the globe's module (src/globe-page.ts,
+ * bundled).
  */
 export function whyHtml(
   site: string,
@@ -623,15 +623,6 @@ export function whyHtml(
   script: string,
   version?: (path: string) => string | undefined,
 ): string {
-  const sections = WHY.sections
-    .map(
-      (s) => `
-      <section class="prose">
-        <h2>${esc(s.heading)}</h2>
-        ${s.paragraphs.map((p) => `<p>${p}</p>`).join('\n        ')}
-      </section>`,
-    )
-    .join('');
   return shell({
     page: whyPage(site),
     site,
@@ -646,10 +637,7 @@ export function whyHtml(
       </figure>
       <div class="why-text">
       <h1>${esc(WHY.title)}</h1>
-      <p class="lede">${esc(WHY.lede)}</p>${sections}
-      <section class="prose">
-        <p>${WHY.closing}</p>
-      </section>
+      <p class="lede">${esc(WHY.lede)}</p>
       </div>
       </div>
       <script type="module" src="${script}"></script>`,
